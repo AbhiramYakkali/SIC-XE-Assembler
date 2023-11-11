@@ -9,6 +9,7 @@
 #define BAD_EXIT 1
 
 //Removes spaces at the end of a string
+//Removes space at the beginning of a string if applicable
 std::string removeSpaces(const std::string& str) {
     size_t lastNonSpaceCharacter = str.find_last_not_of(' ');
     std::string output;
@@ -35,6 +36,8 @@ std::vector<std::string> separateSourceLine(const std::string& line) {
     return output;
 }
 
+//Process assembler directives, updating the address counter as necessary
+//Should update symbol table (once implemented)
 void processAssemblerDirective(int* address, const std::string& instruction, const std::string& operand) {
     if(instruction == "RESW") {
         //Reserve word instruction, increment address counter by 3 times operand
