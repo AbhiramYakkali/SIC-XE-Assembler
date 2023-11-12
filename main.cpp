@@ -150,9 +150,41 @@ void processAssemblerDirective(std::vector<std::string>* lineParts, Data* data) 
     //TODO: Handle all other assembler directives
 }
 
+//Helper function to add bits to the end of an integer
+unsigned int addBits(unsigned int input, const int bits[], int numOfBits) {
+    unsigned int output = input;
+
+    for(int i = 0; i < numOfBits; i++) {
+        output <<= 1;
+        output += bits[i];
+    }
+
+    return output;
+}
+
 //Processes given instruction and returns object code
 //Vector of size 4 stores instruction information: address, label, instruction, operand
-unsigned int convertInstructionToObjectCode(std::vector<std::string> instruction, Data* data) {
+unsigned int convertInstructionToObjectCode(std::vector<std::string> instruction, Data* data, unordered_map<string, pair<int, int>>* opTable) {
+    pair<int, int> instructionInfo = opTable->at(instruction.at(2).substr(1));
+    int format = instructionInfo.second;
+    unsigned int objectCode;
+
+    switch(format) {
+        case 1:
+            //Format 1: object code = opcode
+            return instructionInfo.first;
+        case 2:
+            //Format 2: object code = opcode (8 bits) + r1 (4 bits) + r2 (4 bits)
+            objectCode = instructionInfo.first;
+            return objectCode;
+        case 3:
+            //Format 3: opcode (6) + n i x b p e + disp (12)
+            return 0;
+        case 4:
+            //Format 4: opcode (6) + n i x b p e + address (20)
+            return 0;
+    }
+
     return 0;
 }
 
@@ -162,7 +194,7 @@ int main(int argc, char** argv) {
         exit(BAD_EXIT);
     }
 
-    //Initialize a vector containing all assembler instructions
+    //Initialize a vector containing all assembler directives
     std::set<std::string> assemblerDirectives{"START", "END", "RESB", "RESW", "BYTE", "WORD",
                                               "BASE", "*", "LTORG", "ORG", "EQU", "USE"};
     //Initialize a hashmap to store all instructions, opcodes, and formats
@@ -210,7 +242,7 @@ int main(int argc, char** argv) {
             }
 
             //Increment address counter
-            data.currentAddress += opTable[lineParts.at(1)].second;
+            data.currentAddress += opTable[lineParts.at(1).substr(1)].second;
 
             if(lineParts.at(1)[0] == '+') data.currentAddress++;
         }
@@ -219,17 +251,21 @@ int main(int argc, char** argv) {
     //Pass two of assembler
     //Convert instructions to object code, print to output file
     for(const auto& instruction : instructions) {
-        unsigned int objectCode = convertInstructionToObjectCode(instruction, &data);
-
-        //Print out each instruction in the proper output format
         cout << uppercase << hex << setw(4) << setfill('0') << stoi(instruction.at(0)) << " ";
         cout << instruction.at(1);
         printSpaces(8 - instruction.at(1).length());
         cout << instruction.at(2);
         printSpaces(8 - instruction.at(2).length());
         cout << instruction.at(3);
-        printSpaces(12 - instruction.at(3).length());
-        cout << uppercase << hex << setw(6) << setfill('0') << objectCode << endl;
+
+        if(assemblerDirectives.find(instruction.at(2).substr(1)) == assemblerDirectives.end()) {
+            unsigned int objectCode = convertInstructionToObjectCode(instruction, &data, &opTable);
+
+            printSpaces(12 - instruction.at(3).length());
+            cout << uppercase << hex << setw(6) << setfill('0') << objectCode << endl;
+        } else {
+            cout << endl;
+        }
     }
 
     //symbolTable.printSymbols();
