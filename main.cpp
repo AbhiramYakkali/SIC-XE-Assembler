@@ -3,6 +3,7 @@
 #include <vector>
 #include <set>
 #include <iomanip>
+#include <unordered_map>
 
 #include "data.h"
 
@@ -45,10 +46,78 @@ std::vector<std::string> separateSourceLine(const std::string& line) {
     return output;
 }
 
+//Creates op table
+//Takes in the instruction name, returns a pair <opcode, format>, if format is 3/4, returns 3
+unordered_map<string, pair<int, int>> createOPTable() {
+    unordered_map<string, pair<int, int>> opTable;
+
+    opTable.emplace("ADD", make_pair<int, int>(0x18, 3));
+    opTable.emplace("ADDF", make_pair<int, int>(0x58, 3));
+    opTable.emplace("ADDR", make_pair<int, int>(0x90, 2));
+    opTable.emplace("AND", make_pair<int, int>(0x40, 3));
+    opTable.emplace("CLEAR", make_pair<int, int>(0xB4, 2));
+    opTable.emplace("COMP", make_pair<int, int>(0x28, 3));
+    opTable.emplace("COMPF", make_pair<int, int>(0x88, 3));
+    opTable.emplace("COMPR", make_pair<int, int>(0xA0, 2));
+    opTable.emplace("DIV", make_pair<int, int>(0x24, 3));
+    opTable.emplace("DIVF", make_pair<int, int>(0x64, 3));
+    opTable.emplace("DIVR", make_pair<int, int>(0x9C, 3));
+    opTable.emplace("FIX", make_pair<int, int>(0xC4, 1));
+    opTable.emplace("FLOAT", make_pair<int, int>(0xC0, 1));
+    opTable.emplace("HIO", make_pair<int, int>(0xF4, 1));
+    opTable.emplace("J", make_pair<int, int>(0x3C, 3));
+    opTable.emplace("JEQ", make_pair<int, int>(0x30, 3));
+    opTable.emplace("JGT", make_pair<int, int>(0x34, 3));
+    opTable.emplace("JLT", make_pair<int, int>(0x38, 3));
+    opTable.emplace("JSUB", make_pair<int, int>(0x48, 3));
+    opTable.emplace("LDA", make_pair<int, int>(0x00, 3));
+    opTable.emplace("LDB", make_pair<int, int>(0x68, 3));
+    opTable.emplace("LDCH", make_pair<int, int>(0x50, 3));
+    opTable.emplace("LDF", make_pair<int, int>(0x70, 3));
+    opTable.emplace("LDL", make_pair<int, int>(0x08, 3));
+    opTable.emplace("LDS", make_pair<int, int>(0x6C, 3));
+    opTable.emplace("LDT", make_pair<int, int>(0x74, 3));
+    opTable.emplace("LDX", make_pair<int, int>(0x04, 3));
+    opTable.emplace("LPS", make_pair<int, int>(0xD0, 3));
+    opTable.emplace("MUL", make_pair<int, int>(0x20, 3));
+    opTable.emplace("MULF", make_pair<int, int>(0x60, 3));
+    opTable.emplace("MULR", make_pair<int, int>(0x98, 2));
+    opTable.emplace("NORM", make_pair<int, int>(0xC8, 1));
+    opTable.emplace("OR", make_pair<int, int>(0x44, 3));
+    opTable.emplace("RD", make_pair<int, int>(0xD8, 3));
+    opTable.emplace("RMO", make_pair<int, int>(0xAC, 2));
+    opTable.emplace("RSUB", make_pair<int, int>(0x4C, 3));
+    opTable.emplace("SHIFTL", make_pair<int, int>(0xA4, 2));
+    opTable.emplace("SHIFTR", make_pair<int, int>(0xA8, 2));
+    opTable.emplace("SIO", make_pair<int, int>(0xF0, 1));
+    opTable.emplace("SSK", make_pair<int, int>(0xEC, 3));
+    opTable.emplace("STA", make_pair<int, int>(0x0C, 3));
+    opTable.emplace("STB", make_pair<int, int>(0x78, 3));
+    opTable.emplace("STCH", make_pair<int, int>(0x54, 3));
+    opTable.emplace("STF", make_pair<int, int>(0x80, 3));
+    opTable.emplace("STI", make_pair<int, int>(0xD4, 3));
+    opTable.emplace("STL", make_pair<int, int>(0x14, 3));
+    opTable.emplace("STS", make_pair<int, int>(0x7C, 3));
+    opTable.emplace("STSW", make_pair<int, int>(0xE8, 3));
+    opTable.emplace("STT", make_pair<int, int>(0x84, 3));
+    opTable.emplace("STX", make_pair<int, int>(0x10, 3));
+    opTable.emplace("SUB", make_pair<int, int>(0x1C, 3));
+    opTable.emplace("SUBF", make_pair<int, int>(0x5C, 3));
+    opTable.emplace("SUBR", make_pair<int, int>(0x94, 2));
+    opTable.emplace("SVC", make_pair<int, int>(0xB0, 2));
+    opTable.emplace("TD", make_pair<int, int>(0xE0, 3));
+    opTable.emplace("TIO", make_pair<int, int>(0xF8, 1));
+    opTable.emplace("TIX", make_pair<int, int>(0x2C, 3));
+    opTable.emplace("TIXR", make_pair<int, int>(0xB8, 2));
+    opTable.emplace("WD", make_pair<int, int>(0xDC, 3));
+
+    return opTable;
+}
+
 //Process assembler directives, updating address counter and symbol table as necessary
 void processAssemblerDirective(std::vector<std::string>* lineParts, Data* data) {
     std::string label = lineParts->at(0);
-    std::string instruction = lineParts->at(1);
+    std::string instruction = lineParts->at(1).substr(1);
     std::string operand = lineParts->at(2);
 
     int address = data->currentAddress;
@@ -95,10 +164,15 @@ int main(int argc, char** argv) {
 
     //Initialize a vector containing all assembler instructions
     std::set<std::string> assemblerDirectives{"START", "END", "RESB", "RESW", "BYTE", "WORD",
-                                              "BASE", "END", "*", "LTORG", "ORG", "EQU", "USE"};
+                                              "BASE", "*", "LTORG", "ORG", "EQU", "USE"};
+    //Initialize a hashmap to store all instructions, opcodes, and formats
+    //Call first for opcode, second for format
+    unordered_map<string, pair<int, int>> opTable = createOPTable();
+
     //Initialize symbol table
     SymbolTable symbolTable;
 
+    //Open source code file
     std::ifstream sourceFile(argv[1]);
     std::string line;
 
@@ -125,8 +199,8 @@ int main(int argc, char** argv) {
         std::vector<std::string> instruction{std::to_string(data.currentAddress), lineParts.at(0), lineParts.at(1), lineParts.at(2)};
         instructions.push_back(instruction);
 
-        if(assemblerDirectives.find(lineParts.at(1)) != assemblerDirectives.end()) {
-            //The current instruction is an assembler directive
+        if(assemblerDirectives.find(lineParts.at(1).substr(1)) != assemblerDirectives.end()) {
+            //The current instruction is an assembler directive, must be processed
             processAssemblerDirective(&lineParts, &data);
         } else {
             //Current instruction is not an assembler directive
@@ -135,9 +209,8 @@ int main(int argc, char** argv) {
                 symbolTable.addSymbol(lineParts.at(0), data.currentAddress, true);
             }
 
-            //TODO: Alter this code to work with format 1/2 instructions
             //Increment address counter
-            data.currentAddress += 3;
+            data.currentAddress += opTable[lineParts.at(1)].second;
 
             if(lineParts.at(1)[0] == '+') data.currentAddress++;
         }
