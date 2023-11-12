@@ -151,13 +151,28 @@ void processAssemblerDirective(std::vector<std::string>* lineParts, Data* data) 
 }
 
 //Helper function to add bits to the end of an integer
-unsigned int addBits(unsigned int input, const int bits[], int numOfBits) {
+unsigned int addBits(unsigned int input, const vector<int>& bits) {
     unsigned int output = input;
 
-    for(int i = 0; i < numOfBits; i++) {
+    for(int bit : bits) {
         output <<= 1;
-        output += bits[i];
+        output += bit;
     }
+
+    return output;
+}
+
+//Helper function to create a hash table mapping register to an int array corresponding to its number
+unordered_map<char, vector<int>> initializeRegisterNumbers() {
+    unordered_map<char, vector<int>> output;
+
+    output['A'] = {0, 0, 0, 0};
+    output['X'] = {0, 0, 0, 1};
+    output['L'] = {0, 0, 1, 0};
+    output['B'] = {0, 0, 1, 1};
+    output['S'] = {0, 1, 0, 0};
+    output['T'] = {0, 1, 0, 1};
+    output['F'] = {0, 1, 1, 0};
 
     return output;
 }
@@ -169,6 +184,9 @@ unsigned int convertInstructionToObjectCode(std::vector<std::string> instruction
     int format = instructionInfo.second;
     unsigned int objectCode;
 
+    //Maps each register to an int array corresponding to its number (used in format 2)
+    unordered_map<char, vector<int>> registerNumbers = initializeRegisterNumbers();
+
     switch(format) {
         case 1:
             //Format 1: object code = opcode
@@ -176,6 +194,8 @@ unsigned int convertInstructionToObjectCode(std::vector<std::string> instruction
         case 2:
             //Format 2: object code = opcode (8 bits) + r1 (4 bits) + r2 (4 bits)
             objectCode = instructionInfo.first;
+            objectCode = addBits(objectCode, registerNumbers[instruction.at(3)[1]]);
+            objectCode = addBits(objectCode, registerNumbers[instruction.at(3)[3]]);
             return objectCode;
         case 3:
             //Format 3: opcode (6) + n i x b p e + disp (12)
@@ -194,6 +214,7 @@ int main(int argc, char** argv) {
         exit(BAD_EXIT);
     }
 
+    //REMEMBER TO USE .substr(1) ON INSTRUCTION WHEN SEARCHING THROUGH EITHER OF THESE LISTS
     //Initialize a vector containing all assembler directives
     std::set<std::string> assemblerDirectives{"START", "END", "RESB", "RESW", "BYTE", "WORD",
                                               "BASE", "*", "LTORG", "ORG", "EQU", "USE"};
