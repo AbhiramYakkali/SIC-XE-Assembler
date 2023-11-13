@@ -11,6 +11,9 @@ private:
     vector<string> *literals;
     vector<vector<unsigned int>> *literalInfo;
 
+    string CSectName;
+    int startingAddress, programLength;
+
 public:
     SymbolTable();
     ~SymbolTable();
@@ -21,6 +24,9 @@ public:
     void addLiteral(string literal);
     vector<unsigned int> getLiteralInfo(string literalName);
     void setLiteralsAtAddress(unsigned int address);
+
+    void setCSECT(string name, int address);
+    void setLengthOfProgram(int length);
 
     void printSymbols();
 };

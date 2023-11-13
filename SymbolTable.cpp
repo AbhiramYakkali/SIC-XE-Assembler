@@ -2,6 +2,7 @@
 
 #include <iostream>
 #include <iomanip>
+#include <utility>
 
 SymbolTable::SymbolTable() {
     labels = new vector<string>(0);
@@ -17,6 +18,22 @@ SymbolTable::~SymbolTable() {
     delete(symbolInfo);
     delete(literals);
     delete(literalInfo);
+}
+
+//Functions to set CSect name, starting address, and length (for printing)
+void SymbolTable::setCSECT(string name, int address) {
+    CSectName = std::move(name);
+    startingAddress = address;
+}
+void SymbolTable::setLengthOfProgram(int length) {
+    programLength = length;
+}
+
+//Helper function to print a specified number of spaces
+void addSpaces(int number) {
+    for(int i = 0; i < number; i++) {
+        cout << " ";
+    }
 }
 
 void SymbolTable::addSymbol(const std::string& symbolName, int address, bool relative) {
@@ -41,11 +58,16 @@ pair<int, bool> SymbolTable::getSymbolInfo(const std::string& symbolName) {
     }
 }
 
-void SymbolTable::addLiteral(string literal) {
-    //Isolate the characters within the apostrophes
+//Used to isolate the content of the literal (value between apostrophes)
+string isolateLiteralContent(const string& literal) {
     size_t start = literal.find('\'') + 1;
     size_t end = literal.find('\'', start);
-    string content = literal.substr(start, end - start);
+    return literal.substr(start, end - start);
+}
+
+void SymbolTable::addLiteral(string literal) {
+    //Isolate the characters within the apostrophes
+    string content = isolateLiteralContent(literal);
 
     if(literal[1] == 'C') {
         //Literal is a string
@@ -61,9 +83,10 @@ void SymbolTable::addLiteral(string literal) {
         literalInfo->push_back({value, 0, static_cast<unsigned int>(content.length())});
     } else if(literal[1] == 'X') {
         //Literal is a hexadecimal number
-    }
 
-    //TODO: Add support for integer literals (is it required?)
+        literals->push_back(literal);
+        literalInfo->push_back({static_cast<unsigned int>(stoi(content, nullptr, 16)), 0, static_cast<unsigned int>(content.length())});
+    }
 }
 vector<unsigned int> SymbolTable::getLiteralInfo(string literalName) {
     //Find index of desired literal in literals list
@@ -98,16 +121,38 @@ void SymbolTable::setLiteralsAtAddress(unsigned int address) {
 }
 
 void SymbolTable::printSymbols() {
-    cout << "Symbol  Value   Flags:\n-----------------------" << endl;
+    //Print symbols
+    cout << "CSect   Symbol  Value   LENGTH  Flags:\n--------------------------------------" << endl;
+    cout << CSectName;
+    addSpaces(16 - CSectName.length());
+    cout << uppercase << hex << setw(6) << setfill('0') << startingAddress << "  " << programLength << endl;
+
     for(int i = 0; i < labels->size(); i++) {
+        addSpaces(8);
         cout << labels->at(i);
 
         //Print spaces to format output correctly
-        for(int j = 0; j < 8 - labels->at(i).length(); j++) cout << " ";
+        addSpaces(8 - labels->at(i).length());
 
-        cout << uppercase << hex << setw(6) << setfill('0') << symbolInfo->at(i).first << "  ";
+        cout << uppercase << hex << setw(6) << setfill('0') << symbolInfo->at(i).first;
+        addSpaces(10);
 
         if(symbolInfo->at(i).second) cout << "R" << endl;
         else cout << "A" << endl;
+    }
+
+    //Print literals
+    cout << endl << "Literal Table\nName  Operand   Address  Length:\n--------------------------------" << endl;
+    for(int i = 0; i < literals->size(); i++) {
+        string literal = isolateLiteralContent(literals->at(i));
+        vector<unsigned int> info = literalInfo->at(i);
+
+        cout << literal;
+        addSpaces(6 - literal.length());
+        cout << info[0];
+        addSpaces(11 - to_string(info[0]).length());
+        cout << info[1];
+        addSpaces(10 - to_string(info[1]).length());
+        cout << info[2] << endl;
     }
 }

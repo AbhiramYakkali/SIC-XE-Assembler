@@ -113,25 +113,28 @@ unordered_map<string, pair<int, int>> createOPTable() {
 
 //Takes an operand (immediate operand, label, etc.) and converts it to target address
 unsigned int convertOperandToTargetAddress(const string& operand, Data* data) {
-    if(operand[0] == '#') {
+    //In case of ',X' being present in operand, ignore it
+    string shortenedOperand = operand.substr(0, operand.find(','));
+
+    if(shortenedOperand[0] == '#') {
         //Immediate addressing
         //Check if symbol table contains the operand, if it doesn't, assume the operand is a number
-        pair<int, bool> symbolInfo = data->symbolTable->getSymbolInfo(operand.substr(1));
+        pair<int, bool> symbolInfo = data->symbolTable->getSymbolInfo(shortenedOperand.substr(1));
 
         if(symbolInfo.first == -1) {
-            return stoi(operand.substr(1));
+            return stoi(shortenedOperand.substr(1));
         } else {
             return symbolInfo.first;
         }
     }
-    if(operand[0] == '@') {
+    if(shortenedOperand[0] == '@') {
         //Indirect addressing
     }
-    if(operand[0] == ' ') {
+    if(shortenedOperand[0] == ' ') {
         //Simple addressing, get symbol address from symbol table and return
-        return data->symbolTable->getSymbolInfo(operand.substr(1)).first;
+        return data->symbolTable->getSymbolInfo(shortenedOperand.substr(1)).first;
     }
-    if(operand[0] == '=') {
+    if(shortenedOperand[0] == '=') {
         return 0x2F07;
     }
 }
@@ -148,10 +151,12 @@ void processAssemblerDirective(vector<string>* lineParts, Data* data) {
 
     if(instruction == "START") {
         data->currentAddress = stoi(operand);
+        data->symbolTable->setCSECT(label, stoi(operand));
     }
     if(instruction == "END") {
         //End of program, call command to pool literals at the current address
         data->symbolTable->setLiteralsAtAddress(data->currentAddress);
+        data->symbolTable->setLengthOfProgram(data->currentAddress);
     }
     if(instruction == "RESW") {
         //Reserve word instruction, increment address counter by 3 times operand
@@ -189,6 +194,12 @@ unsigned int addBits(unsigned int input, const vector<int>& bits) {
     }
 
     return output;
+}
+//Helper function to add a number to the end of an integer
+unsigned int addNumber(unsigned int input, unsigned int numToAdd, int shiftAmount) {
+    unsigned int output = input;
+    output <<= shiftAmount;
+    return output + numToAdd;
 }
 
 //Helper function to create a hash table mapping register to an int array corresponding to its number
@@ -266,13 +277,18 @@ unsigned int convertInstructionToObjectCode(vector<string> instruction, Data* da
         //Determine base/PC relative or direct addressing
         //Try PC relative addressing first, if address is too far away, try base relative, then direct
         int address = stoi(instruction[0]);
-        unsigned int diff = targetAddress - address;
+        int diff = targetAddress - address;
         objectCode = addBits(objectCode, {0, 1});
 
         //Add sixth bit (e bit); always 0 because this is format 3 instruction
         objectCode = addBits(objectCode, {0});
+
+        //Add last 12 bits (displacement)
+        //Mask last 12 bits of diff so that negative numbers are handled properly
+        objectCode = addNumber(objectCode, diff & 0xFFF, 12);
         return objectCode;
-    } else {
+    }
+    if(format == 4) {
         //Format 4: opcode (6) + n i x b p e + address (20)
         objectCode = instructionInfo.first;
         objectCode >>= 2;
@@ -286,6 +302,9 @@ unsigned int convertInstructionToObjectCode(vector<string> instruction, Data* da
 
         //Add last 3 bits (b p e); always 0 0 1 because this is format 4 instruction
         objectCode = addBits(objectCode, {0, 0, 1});
+
+        //Add last 20 bits (address)
+        objectCode = addNumber(objectCode, targetAddress, 20);
         return objectCode;
     }
 }
@@ -361,26 +380,33 @@ int main(int argc, char** argv) {
     for(int i = 0; i < instructions.size(); i++) {
         vector<string> instruction = instructions.at(i);
 
-        cout << uppercase << hex << setw(4) << setfill('0') << stoi(instruction.at(0)) << " ";
+        //Print instruction information (address, label, instruction, operand)
+        cout << uppercase << hex << setw(4) << setfill('0') << stoi(instruction.at(0)) << "    ";
         cout << instruction.at(1);
         printSpaces(8 - instruction.at(1).length());
         cout << instruction.at(2);
-        printSpaces(8 - instruction.at(2).length());
+        printSpaces(9 - instruction.at(2).length());
         cout << instruction.at(3);
 
+        //Print object code of instruction
         if(assemblerDirectives.find(instruction.at(2).substr(1)) == assemblerDirectives.end()) {
             //Current instruction is not an assembler directive, convert instruction to object code and print
             instruction[0] = instructions.at(i + 1)[0];
             unsigned int objectCode = convertInstructionToObjectCode(instruction, &data, &opTable);
 
-            printSpaces(12 - instruction.at(3).length());
-            cout << uppercase << hex << setw(6) << setfill('0') << objectCode << endl;
+            //Number of characters displayed in object code depends on format
+            int format = opTable.at(instruction.at(2).substr(1)).second;
+            if(instruction.at(2)[0] == '+') format++;
+
+            printSpaces(26 - instruction.at(3).length());
+            cout << uppercase << hex << setw(2 * format) << setfill('0') << objectCode << endl;
         } else {
             cout << endl;
         }
     }
 
-    //symbolTable.printSymbols();
+    cout << endl << endl;
+    symbolTable.printSymbols();
 
     return NORMAL_EXIT;
 }
