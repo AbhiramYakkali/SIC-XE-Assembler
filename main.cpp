@@ -18,9 +18,9 @@ void printSpaces(int number) {
 }
 
 //Removes spaces at the end of a string
-std::string removeSpaces(const std::string& str) {
+string removeSpaces(const string& str) {
     size_t lastNonSpaceCharacter = str.find_last_not_of(' ');
-    std::string output;
+    string output;
 
     if(lastNonSpaceCharacter == 0) {
         output = "";
@@ -33,12 +33,12 @@ std::string removeSpaces(const std::string& str) {
 
 //Takes in a line of SIC/XE source code and returns its parts
 //Returns a string array of format [label, opcode, operand]
-std::vector<std::string> separateSourceLine(const std::string& line) {
-    std::vector<std::string> output;
+vector<string> separateSourceLine(const string& line) {
+    vector<string> output;
 
-    output.push_back(removeSpaces(line.substr(0, 8)));
-    output.push_back(removeSpaces(line.substr(8, 6)));
-    output.push_back(removeSpaces(line.substr(16, 17)));
+    output.push_back(removeSpaces(line.substr(0, 9)));
+    output.push_back(removeSpaces(line.substr(9, 7)));
+    output.push_back(removeSpaces(line.substr(17, 17)));
 
     return output;
 }
@@ -111,12 +111,37 @@ unordered_map<string, pair<int, int>> createOPTable() {
     return opTable;
 }
 
+//Takes an operand (immediate operand, label, etc.) and converts it to target address
+unsigned int convertOperandToTargetAddress(const string& operand, Data* data) {
+    if(operand[0] == '#') {
+        //Immediate addressing
+        //Check if symbol table contains the operand, if it doesn't, assume the operand is a number
+        pair<int, bool> symbolInfo = data->symbolTable->getSymbolInfo(operand.substr(1));
+
+        if(symbolInfo.first == -1) {
+            return stoi(operand.substr(1));
+        } else {
+            return symbolInfo.first;
+        }
+    }
+    if(operand[0] == '@') {
+        //Indirect addressing
+    }
+    if(operand[0] == ' ') {
+        //Simple addressing, get symbol address from symbol table and return
+        return data->symbolTable->getSymbolInfo(operand.substr(1)).first;
+    }
+    if(operand[0] == '=') {
+        return 0x2F07;
+    }
+}
+
 //Process assembler directives, updating address counter and symbol table as necessary
-void processAssemblerDirective(std::vector<std::string>* lineParts, Data* data) {
-    std::string label = lineParts->at(0);
-    std::string instruction = lineParts->at(1).substr(1);
+void processAssemblerDirective(vector<string>* lineParts, Data* data) {
+    string label = lineParts->at(0);
+    string instruction = lineParts->at(1).substr(1);
     //TODO: Handle operands not being numbers
-    std::string operand = lineParts->at(2);
+    string operand = lineParts->at(2);
 
     int address = data->currentAddress;
     SymbolTable* symbolTable = data->symbolTable;
@@ -124,18 +149,19 @@ void processAssemblerDirective(std::vector<std::string>* lineParts, Data* data) 
     if(instruction == "START") {
         data->currentAddress = stoi(operand);
     }
-    if(instruction == "BASE") {
-        data->baseRegister = stoi(operand);
+    if(instruction == "END") {
+        //End of program, call command to pool literals at the current address
+        data->symbolTable->setLiteralsAtAddress(data->currentAddress);
     }
     if(instruction == "RESW") {
         //Reserve word instruction, increment address counter by 3 times operand
-        int numberOfWords = std::stoi(operand);
+        int numberOfWords = stoi(operand);
         symbolTable->addSymbol(label, address, true);
         data->currentAddress += numberOfWords * 3;
     }
     if(instruction == "RESB") {
         //Reserve byte instruction, increment address counter by operand
-        int numberOfBytes = std::stoi(operand);
+        int numberOfBytes = stoi(operand);
         symbolTable->addSymbol(label, address, true);
         data->currentAddress += numberOfBytes;
     }
@@ -197,14 +223,18 @@ vector<int> findAddressingType(string operand) {
 
 //Processes given instruction and returns object code
 //Vector of size 4 stores instruction information: address, label, instruction, operand
-unsigned int convertInstructionToObjectCode(std::vector<std::string> instruction, Data* data, unordered_map<string, pair<int, int>>* opTable) {
+unsigned int convertInstructionToObjectCode(vector<string> instruction, Data* data, unordered_map<string, pair<int, int>>* opTable) {
     pair<int, int> instructionInfo = opTable->at(instruction.at(2).substr(1));
     int format = instructionInfo.second;
     unsigned int objectCode;
 
-    //TODO: Change this to make this work with operands that are not numbers
-    //Write function to convert operands to actual numbers?
-    int targetAddress = stoi(instruction[3].substr(1));
+    unsigned int targetAddress;
+
+    //Don't calculate target address for format 3/4 instructions
+    if(format == 3 || format == 4)  {
+        if(instruction[3].empty()) return 0; //TODO: Handle format 3/4 instructions that don't take operands (ex: RSUB)
+        else targetAddress = convertOperandToTargetAddress(instruction[3], data);
+    }
 
     //Maps each register to an int array corresponding to its number (used in format 2)
     unordered_map<char, vector<int>> registerNumbers = initializeRegisterNumbers();
@@ -236,7 +266,8 @@ unsigned int convertInstructionToObjectCode(std::vector<std::string> instruction
         //Determine base/PC relative or direct addressing
         //Try PC relative addressing first, if address is too far away, try base relative, then direct
         int address = stoi(instruction[0]);
-        int diff = targetAddress - address;
+        unsigned int diff = targetAddress - address;
+        objectCode = addBits(objectCode, {0, 1});
 
         //Add sixth bit (e bit); always 0 because this is format 3 instruction
         objectCode = addBits(objectCode, {0});
@@ -261,13 +292,13 @@ unsigned int convertInstructionToObjectCode(std::vector<std::string> instruction
 
 int main(int argc, char** argv) {
     if(argc == 1) {
-        std::cout << "Invalid number of arguments; received 0, expected at least 1." << std::endl;
+        cout << "Invalid number of arguments; received 0, expected at least 1." << endl;
         exit(BAD_EXIT);
     }
 
     //REMEMBER TO USE .substr(1) ON INSTRUCTION WHEN SEARCHING THROUGH EITHER OF THESE LISTS
     //Initialize a vector containing all assembler directives
-    std::set<std::string> assemblerDirectives{"START", "END", "RESB", "RESW", "BYTE", "WORD",
+    set<string> assemblerDirectives{"START", "END", "RESB", "RESW", "BYTE", "WORD",
                                               "BASE", "*", "LTORG", "ORG", "EQU", "USE"};
     //Initialize a hashmap to store all instructions, opcodes, and formats
     //Call first for opcode, second for format
@@ -277,19 +308,19 @@ int main(int argc, char** argv) {
     SymbolTable symbolTable;
 
     //Open source code file
-    std::ifstream sourceFile(argv[1]);
-    std::string line;
+    ifstream sourceFile(argv[1]);
+    string line;
 
     //Initialize data object for ease of passing information to functions
     Data data;
     data.currentAddress = 0;
-    data.baseRegister = 0;
+    data.baseRegister = -1;
     data.symbolTable = &symbolTable;
 
     //Vector to store data on instructions along with their calculated addresses
     //Allows pass two to skip reading the file and recalculating addresses, ignoring comments, etc.
     //Inner vector stores information for one instruction (size 4): address, label, instruction, operand
-    std::vector<std::vector<std::string>> instructions;
+    vector<vector<string>> instructions;
 
     //Pass one of assembler
     //Process assembler directives, create symbol and literal table, process addresses of each instruction
@@ -297,10 +328,10 @@ int main(int argc, char** argv) {
         //Skip comments
         if(line[0] == '.') continue;
 
-        std::vector<std::string> lineParts = separateSourceLine(line);
+        vector<string> lineParts = separateSourceLine(line);
 
         //Add current instruction to instructions vector (to be used in pass two)
-        std::vector<std::string> instruction{std::to_string(data.currentAddress), lineParts.at(0), lineParts.at(1), lineParts.at(2)};
+        vector<string> instruction{to_string(data.currentAddress), lineParts.at(0), lineParts.at(1), lineParts.at(2)};
         instructions.push_back(instruction);
 
         if(assemblerDirectives.find(lineParts.at(1).substr(1)) != assemblerDirectives.end()) {
@@ -313,6 +344,11 @@ int main(int argc, char** argv) {
                 symbolTable.addSymbol(lineParts.at(0), data.currentAddress, true);
             }
 
+            //Check if current instruction contains a literal, add it to the literal pool if so
+            if(lineParts.at(2)[0] == '=') {
+                symbolTable.addLiteral(lineParts.at(2));
+            }
+
             //Increment address counter
             data.currentAddress += opTable[lineParts.at(1).substr(1)].second;
 
@@ -322,7 +358,9 @@ int main(int argc, char** argv) {
 
     //Pass two of assembler
     //Convert instructions to object code, print to output file
-    for(const auto& instruction : instructions) {
+    for(int i = 0; i < instructions.size(); i++) {
+        vector<string> instruction = instructions.at(i);
+
         cout << uppercase << hex << setw(4) << setfill('0') << stoi(instruction.at(0)) << " ";
         cout << instruction.at(1);
         printSpaces(8 - instruction.at(1).length());
@@ -332,6 +370,7 @@ int main(int argc, char** argv) {
 
         if(assemblerDirectives.find(instruction.at(2).substr(1)) == assemblerDirectives.end()) {
             //Current instruction is not an assembler directive, convert instruction to object code and print
+            instruction[0] = instructions.at(i + 1)[0];
             unsigned int objectCode = convertInstructionToObjectCode(instruction, &data, &opTable);
 
             printSpaces(12 - instruction.at(3).length());
