@@ -18,7 +18,6 @@ void printSpaces(int number) {
 }
 
 //Removes spaces at the end of a string
-//Removes space at the beginning of a string if applicable
 std::string removeSpaces(const std::string& str) {
     size_t lastNonSpaceCharacter = str.find_last_not_of(' ');
     std::string output;
@@ -29,8 +28,6 @@ std::string removeSpaces(const std::string& str) {
         output = str.substr(0, lastNonSpaceCharacter + 1);
     }
 
-    //if(output[0] == ' ') return output.substr(1);
-    //else return output;
     return output;
 }
 
@@ -118,17 +115,23 @@ unordered_map<string, pair<int, int>> createOPTable() {
 void processAssemblerDirective(std::vector<std::string>* lineParts, Data* data) {
     std::string label = lineParts->at(0);
     std::string instruction = lineParts->at(1).substr(1);
+    //TODO: Handle operands not being numbers
     std::string operand = lineParts->at(2);
 
     int address = data->currentAddress;
     SymbolTable* symbolTable = data->symbolTable;
 
+    if(instruction == "START") {
+        data->currentAddress = stoi(operand);
+    }
+    if(instruction == "BASE") {
+        data->baseRegister = stoi(operand);
+    }
     if(instruction == "RESW") {
         //Reserve word instruction, increment address counter by 3 times operand
         int numberOfWords = std::stoi(operand);
         symbolTable->addSymbol(label, address, true);
         data->currentAddress += numberOfWords * 3;
-        return;
     }
     if(instruction == "RESB") {
         //Reserve byte instruction, increment address counter by operand
@@ -177,6 +180,21 @@ unordered_map<char, vector<int>> initializeRegisterNumbers() {
     return output;
 }
 
+//Finds the addressing type of the given instruction
+//Returns a vector containing the first two bits of nixbpe (n and i)
+vector<int> findAddressingType(string operand) {
+    char firstChar = operand[0];
+
+    switch(firstChar) {
+        case '@':
+            return {1, 0};
+        case '#':
+            return {0, 1};
+        default:
+            return {1, 1};
+    }
+}
+
 //Processes given instruction and returns object code
 //Vector of size 4 stores instruction information: address, label, instruction, operand
 unsigned int convertInstructionToObjectCode(std::vector<std::string> instruction, Data* data, unordered_map<string, pair<int, int>>* opTable) {
@@ -184,28 +202,61 @@ unsigned int convertInstructionToObjectCode(std::vector<std::string> instruction
     int format = instructionInfo.second;
     unsigned int objectCode;
 
+    //TODO: Change this to make this work with operands that are not numbers
+    //Write function to convert operands to actual numbers?
+    int targetAddress = stoi(instruction[3].substr(1));
+
     //Maps each register to an int array corresponding to its number (used in format 2)
     unordered_map<char, vector<int>> registerNumbers = initializeRegisterNumbers();
 
-    switch(format) {
-        case 1:
-            //Format 1: object code = opcode
-            return instructionInfo.first;
-        case 2:
-            //Format 2: object code = opcode (8 bits) + r1 (4 bits) + r2 (4 bits)
-            objectCode = instructionInfo.first;
-            objectCode = addBits(objectCode, registerNumbers[instruction.at(3)[1]]);
-            objectCode = addBits(objectCode, registerNumbers[instruction.at(3)[3]]);
-            return objectCode;
-        case 3:
-            //Format 3: opcode (6) + n i x b p e + disp (12)
-            return 0;
-        case 4:
-            //Format 4: opcode (6) + n i x b p e + address (20)
-            return 0;
-    }
+    //Check for '+' before instruction, switch to format 4 if found
+    if(instruction[2][0] == '+') format = 4;
 
-    return 0;
+    if(format == 1) {
+        //Format 1: object code = opcode
+        return instructionInfo.first;
+    } else if(format == 2) {
+        //Format 2: object code = opcode (8 bits) + r1 (4 bits) + r2 (4 bits)
+        objectCode = instructionInfo.first;
+        objectCode = addBits(objectCode, registerNumbers[instruction.at(3)[1]]);
+        objectCode = addBits(objectCode, registerNumbers[instruction.at(3)[3]]);
+        return objectCode;
+    } else if(format == 3) {
+        //Format 3: opcode (6) + n i x b p e + disp (12)
+        objectCode = instructionInfo.first;
+        objectCode >>= 2;
+
+        //Add first two bits (addressing type)
+        objectCode = addBits(objectCode, findAddressingType(instruction[3]));
+
+        //Add third bit (x bit)
+        if(instruction[3].back() == 'X') objectCode = addBits(objectCode, {1});
+        else objectCode = addBits(objectCode, {0});
+
+        //Determine base/PC relative or direct addressing
+        //Try PC relative addressing first, if address is too far away, try base relative, then direct
+        int address = stoi(instruction[0]);
+        int diff = targetAddress - address;
+
+        //Add sixth bit (e bit); always 0 because this is format 3 instruction
+        objectCode = addBits(objectCode, {0});
+        return objectCode;
+    } else {
+        //Format 4: opcode (6) + n i x b p e + address (20)
+        objectCode = instructionInfo.first;
+        objectCode >>= 2;
+
+        //Add first two bits (addressing type)
+        objectCode = addBits(objectCode, findAddressingType(instruction[3]));
+
+        //Add third bit (x bit)
+        if(instruction[3].back() == 'X') objectCode = addBits(objectCode, {1});
+        else objectCode = addBits(objectCode, {0});
+
+        //Add last 3 bits (b p e); always 0 0 1 because this is format 4 instruction
+        objectCode = addBits(objectCode, {0, 0, 1});
+        return objectCode;
+    }
 }
 
 int main(int argc, char** argv) {
@@ -280,6 +331,7 @@ int main(int argc, char** argv) {
         cout << instruction.at(3);
 
         if(assemblerDirectives.find(instruction.at(2).substr(1)) == assemblerDirectives.end()) {
+            //Current instruction is not an assembler directive, convert instruction to object code and print
             unsigned int objectCode = convertInstructionToObjectCode(instruction, &data, &opTable);
 
             printSpaces(12 - instruction.at(3).length());
