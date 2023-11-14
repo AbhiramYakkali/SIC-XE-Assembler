@@ -129,15 +129,12 @@ unsigned int convertOperandToTargetAddress(const string& operand, Data* data) {
             return symbolInfo.first;
         }
     }
-    if(shortenedOperand[0] == '@') {
-        //Indirect addressing
-    }
-    if(shortenedOperand[0] == ' ') {
-        //Simple addressing, get symbol address from symbol table and return
+    if(shortenedOperand[0] == ' ' || shortenedOperand[0] == '@') {
+        //Simple/Indirect addressing, get symbol address from symbol table and return
         return data->symbolTable->getSymbolInfo(shortenedOperand.substr(1)).first;
     }
     if(shortenedOperand[0] == '=') {
-        return 0x2F07;
+        return data->symbolTable->getLiteralInfo(shortenedOperand).at(1);
     }
 }
 
@@ -157,7 +154,7 @@ void processAssemblerDirective(vector<string>* lineParts, Data* data, vector<vec
     }
     if(instruction == "END") {
         //End of program, call command to pool literals at the current address
-        data->symbolTable->setLengthOfProgram(data->currentAddress);
+        data->symbolTable->setLengthOfProgram(data->currentAddress + 3);
         data->currentAddress = data->symbolTable->setLiteralsAtAddress(data->currentAddress, instructions);
     }
     if(instruction == "RESW") {
@@ -234,6 +231,45 @@ vector<int> findAddressingType(string operand) {
     }
 }
 
+//The following three functions check if each type of addressing works: PC relative, base relative, direct
+//Returns a pair <valid, address>, check valid boolean first to see if the addressing mode works
+pair<bool, unsigned int> testPCRelativeAddressing(unsigned int targetAddress, int address, unsigned int objectCode) {
+    int diff = targetAddress - address;
+    if(diff >= -2048 && diff <= 2047) {
+        //Meets conditions for PC relative addressing, use PC relative addressing
+        objectCode = addBits(objectCode, {0, 1, 0});
+        //Add last 12 bits (displacement)
+        //Mask last 12 bits of diff so that negative numbers are handled properly
+        objectCode = addNumber(objectCode, diff & 0xFFF, 12);
+        return make_pair(true, objectCode);
+    } else {
+        return make_pair(false, 0);
+    }
+}
+pair<bool, unsigned int> testBaseRelativeAddressing(unsigned int targetAddress, int base, unsigned int objectCode) {
+    int diff = targetAddress - base;
+    if(base != -1 && diff >= 0 && diff <= 4095) {
+        //Meets conditions for base relative addressing, use base relative addressing
+        objectCode = addBits(objectCode, {1, 0, 0});
+        //Add last 12 bits (displacement), masking not necessary because diff must be positive
+        objectCode = addNumber(objectCode, diff, 12);
+        return make_pair(true, objectCode);
+    } else {
+        return make_pair(false, 0);
+    }
+}
+pair<bool, unsigned int> testDirectAddressing(unsigned int targetAddress, unsigned int objectCode) {
+    if(targetAddress <= 4095) {
+        //Meets conditions for direct addressing, use direct addressing
+        objectCode = addBits(objectCode, {0, 0, 0});
+        //Add last 12 bits (address), masking not necessary because address must be positive
+        objectCode = addNumber(objectCode, targetAddress, 12);
+        return make_pair(true, objectCode);
+    } else {
+        return make_pair(false, 0);
+    }
+}
+
 //Processes given instruction and returns object code
 //Vector of size 4 stores instruction information: address, label, instruction, operand
 unsigned int convertInstructionToObjectCode(vector<string>* instruction, Data* data, unordered_map<string, pair<int, int>>* opTable) {
@@ -245,7 +281,7 @@ unsigned int convertInstructionToObjectCode(vector<string>* instruction, Data* d
 
     //Don't calculate target address for format 3/4 instructions
     if(format == 3 || format == 4)  {
-        if(instruction->at(3).empty()) return 0; //TODO: Handle format 3/4 instructions that don't take operands (ex: RSUB)
+        if(instruction->at(2) == " RSUB") return 0x4F0000;
         else targetAddress = convertOperandToTargetAddress(instruction->at(3), data);
     }
 
@@ -276,39 +312,39 @@ unsigned int convertInstructionToObjectCode(vector<string>* instruction, Data* d
         if(instruction->at(3).back() == 'X') objectCode = addBits(objectCode, {1});
         else objectCode = addBits(objectCode, {0});
 
-        //Determine base/PC relative or direct addressing
-        //Try PC relative addressing first, if address is too far away, try base relative, then direct
+        //Determine addressing mode
         int address = stoi(instruction->at(0));
 
-        //Try PC relative addressing
-        int diff = targetAddress - address;
-        if(diff >= -2048 && diff <= 2047) {
-            //Meets conditions for PC relative addressing, use PC relative addressing
-            objectCode = addBits(objectCode, {0, 1, 0});
-            //Add last 12 bits (displacement)
-            //Mask last 12 bits of diff so that negative numbers are handled properly
-            objectCode = addNumber(objectCode, diff & 0xFFF, 12);
-            return objectCode;
-        }
+        if(instruction->at(3)[0] == '#') {
+            //Using immediate addressing
+            //Addressing mode order: direct, PC relative, base relative
 
-        //Try base relative addressing
-        int base = data->baseRegister;
-        diff = targetAddress - base;
-        if(base != -1 && diff >= 0 && diff <= 4095) {
-            //Meets conditions for base relative addressing, use base relative addressing
-            objectCode = addBits(objectCode, {1, 0, 0});
-            //Add last 12 bits (displacement), masking not necessary because diff must be positive
-            objectCode = addNumber(objectCode, diff, 12);
-            return objectCode;
-        }
+            //Try direct addressing
+            pair<bool, unsigned int> result = testDirectAddressing(targetAddress, objectCode);
+            if(result.first) return result.second;
 
-        //Try direct addressing
-        if(targetAddress <= 4095) {
-            //Meets conditions for direct addressing, use direct addressing
-            objectCode = addBits(objectCode, {0, 0, 0});
-            //Add last 12 bits (address), masking not necessary because address must be positive
-            objectCode = addNumber(objectCode, targetAddress, 12);
-            return objectCode;
+            //Try PC relative addressing
+            result = testPCRelativeAddressing(targetAddress, address, objectCode);
+            if(result.first) return result.second;
+
+            //Try base relative addressing
+            result = testBaseRelativeAddressing(targetAddress, data->baseRegister, objectCode);
+            if(result.first) return result.second;
+        } else {
+            //Simple/indirect addressing
+            //Addressing mode order: PC relative, base relative, direct
+
+            //Try PC relative addressing
+            pair<bool, unsigned int> result = testPCRelativeAddressing(targetAddress, address, objectCode);
+            if(result.first) return result.second;
+
+            //Try base relative addressing
+            result = testBaseRelativeAddressing(targetAddress, data->baseRegister, objectCode);
+            if(result.first) return result.second;
+
+            //Try direct addressing
+            result = testDirectAddressing(targetAddress, objectCode);
+            if(result.first) return result.second;
         }
 
         //Address does not fit in a format 3 instruction, convert to format 4
@@ -391,7 +427,6 @@ int main(int argc, char** argv) {
         //Add current instruction to instructions vector (to be used in pass two)
         vector<string> instruction{to_string(data.currentAddress), lineParts.at(0), lineParts.at(1), lineParts.at(2)};
 
-
         if(assemblerDirectives.find(lineParts.at(1).substr(1)) != assemblerDirectives.end()) {
             //The current instruction is an assembler directive, must be processed
             processAssemblerDirective(&lineParts, &data, &instructions);
@@ -423,10 +458,6 @@ int main(int argc, char** argv) {
     for(int i = 0; i < instructions.size(); i++) {
         vector<string> instruction = instructions.at(i);
 
-        //Print instruction information (address, label, instruction, operand)
-        //Don't print address if the instruction is 'END'
-
-
         //Check if the current instruction is a literal definition
         if(instruction.at(1) == "*") {
             printInstruction(instruction);
@@ -445,7 +476,7 @@ int main(int argc, char** argv) {
             int format = opTable.at(instruction.at(2).substr(1)).second;
             if(instruction.at(2)[0] == '+') format++;
 
-
+            instruction[0] = instructions.at(i)[0];
             printInstruction(instruction);
             printSpaces(9 - instruction.at(2).length());
             cout << instruction.at(3);
