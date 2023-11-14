@@ -116,6 +116,8 @@ unsigned int convertOperandToTargetAddress(const string& operand, Data* data) {
     //In case of ',X' being present in operand, ignore it
     string shortenedOperand = operand.substr(0, operand.find(','));
 
+    //TODO: Handle operand being a number (useful for START, RESB, RESW, etc.)
+
     if(shortenedOperand[0] == '#') {
         //Immediate addressing
         //Check if symbol table contains the operand, if it doesn't, assume the operand is a number
@@ -143,8 +145,8 @@ unsigned int convertOperandToTargetAddress(const string& operand, Data* data) {
 void processAssemblerDirective(vector<string>* lineParts, Data* data, vector<vector<string>>* instructions) {
     string label = lineParts->at(0);
     string instruction = lineParts->at(1).substr(1);
-    //TODO: Handle operands not being numbers
     string operand = lineParts->at(2);
+    int targetAddress = convertOperandToTargetAddress(operand, data);
 
     int address = data->currentAddress;
     SymbolTable* symbolTable = data->symbolTable;
@@ -234,8 +236,8 @@ vector<int> findAddressingType(string operand) {
 
 //Processes given instruction and returns object code
 //Vector of size 4 stores instruction information: address, label, instruction, operand
-unsigned int convertInstructionToObjectCode(vector<string> instruction, Data* data, unordered_map<string, pair<int, int>>* opTable) {
-    pair<int, int> instructionInfo = opTable->at(instruction.at(2).substr(1));
+unsigned int convertInstructionToObjectCode(vector<string>* instruction, Data* data, unordered_map<string, pair<int, int>>* opTable) {
+    pair<int, int> instructionInfo = opTable->at(instruction->at(2).substr(1));
     int format = instructionInfo.second;
     unsigned int objectCode;
 
@@ -243,15 +245,15 @@ unsigned int convertInstructionToObjectCode(vector<string> instruction, Data* da
 
     //Don't calculate target address for format 3/4 instructions
     if(format == 3 || format == 4)  {
-        if(instruction[3].empty()) return 0; //TODO: Handle format 3/4 instructions that don't take operands (ex: RSUB)
-        else targetAddress = convertOperandToTargetAddress(instruction[3], data);
+        if(instruction->at(3).empty()) return 0; //TODO: Handle format 3/4 instructions that don't take operands (ex: RSUB)
+        else targetAddress = convertOperandToTargetAddress(instruction->at(3), data);
     }
 
     //Maps each register to an int array corresponding to its number (used in format 2)
     unordered_map<char, vector<int>> registerNumbers = initializeRegisterNumbers();
 
     //Check for '+' before instruction, switch to format 4 if found
-    if(instruction[2][0] == '+') format = 4;
+    if(instruction->at(2)[0] == '+') format = 4;
 
     if(format == 1) {
         //Format 1: object code = opcode
@@ -259,8 +261,8 @@ unsigned int convertInstructionToObjectCode(vector<string> instruction, Data* da
     } else if(format == 2) {
         //Format 2: object code = opcode (8 bits) + r1 (4 bits) + r2 (4 bits)
         objectCode = instructionInfo.first;
-        objectCode = addBits(objectCode, registerNumbers[instruction.at(3)[1]]);
-        objectCode = addBits(objectCode, registerNumbers[instruction.at(3)[3]]);
+        objectCode = addBits(objectCode, registerNumbers[instruction->at(3)[1]]);
+        objectCode = addBits(objectCode, registerNumbers[instruction->at(3)[3]]);
         return objectCode;
     } else if(format == 3) {
         //Format 3: opcode (6) + n i x b p e + disp (12)
@@ -268,25 +270,50 @@ unsigned int convertInstructionToObjectCode(vector<string> instruction, Data* da
         objectCode >>= 2;
 
         //Add first two bits (addressing type)
-        objectCode = addBits(objectCode, findAddressingType(instruction[3]));
+        objectCode = addBits(objectCode, findAddressingType(instruction->at(3)));
 
         //Add third bit (x bit)
-        if(instruction[3].back() == 'X') objectCode = addBits(objectCode, {1});
+        if(instruction->at(3).back() == 'X') objectCode = addBits(objectCode, {1});
         else objectCode = addBits(objectCode, {0});
 
         //Determine base/PC relative or direct addressing
         //Try PC relative addressing first, if address is too far away, try base relative, then direct
-        int address = stoi(instruction[0]);
+        int address = stoi(instruction->at(0));
+
+        //Try PC relative addressing
         int diff = targetAddress - address;
-        objectCode = addBits(objectCode, {0, 1});
+        if(diff >= -2048 && diff <= 2047) {
+            //Meets conditions for PC relative addressing, use PC relative addressing
+            objectCode = addBits(objectCode, {0, 1, 0});
+            //Add last 12 bits (displacement)
+            //Mask last 12 bits of diff so that negative numbers are handled properly
+            objectCode = addNumber(objectCode, diff & 0xFFF, 12);
+            return objectCode;
+        }
 
-        //Add sixth bit (e bit); always 0 because this is format 3 instruction
-        objectCode = addBits(objectCode, {0});
+        //Try base relative addressing
+        int base = data->baseRegister;
+        diff = targetAddress - base;
+        if(base != -1 && diff >= 0 && diff <= 4095) {
+            //Meets conditions for base relative addressing, use base relative addressing
+            objectCode = addBits(objectCode, {1, 0, 0});
+            //Add last 12 bits (displacement), masking not necessary because diff must be positive
+            objectCode = addNumber(objectCode, diff, 12);
+            return objectCode;
+        }
 
-        //Add last 12 bits (displacement)
-        //Mask last 12 bits of diff so that negative numbers are handled properly
-        objectCode = addNumber(objectCode, diff & 0xFFF, 12);
-        return objectCode;
+        //Try direct addressing
+        if(targetAddress <= 4095) {
+            //Meets conditions for direct addressing, use direct addressing
+            objectCode = addBits(objectCode, {0, 0, 0});
+            //Add last 12 bits (address), masking not necessary because address must be positive
+            objectCode = addNumber(objectCode, targetAddress, 12);
+            return objectCode;
+        }
+
+        //Address does not fit in a format 3 instruction, convert to format 4
+        format = 4;
+        instruction->at(2)[0] = '+';
     }
     if(format == 4) {
         //Format 4: opcode (6) + n i x b p e + address (20)
@@ -294,10 +321,10 @@ unsigned int convertInstructionToObjectCode(vector<string> instruction, Data* da
         objectCode >>= 2;
 
         //Add first two bits (addressing type)
-        objectCode = addBits(objectCode, findAddressingType(instruction[3]));
+        objectCode = addBits(objectCode, findAddressingType(instruction->at(3)));
 
         //Add third bit (x bit)
-        if(instruction[3].back() == 'X') objectCode = addBits(objectCode, {1});
+        if(instruction->at(3).back() == 'X') objectCode = addBits(objectCode, {1});
         else objectCode = addBits(objectCode, {0});
 
         //Add last 3 bits (b p e); always 0 0 1 because this is format 4 instruction
@@ -309,6 +336,18 @@ unsigned int convertInstructionToObjectCode(vector<string> instruction, Data* da
     }
 }
 
+//Prints address, label, instruction, and operand of a given line of code
+void printInstruction(vector<string> instruction) {
+    if(instruction[2] == " END") {
+        cout << "        ";
+    } else {
+        cout << uppercase << hex << setw(4) << setfill('0') << stoi(instruction.at(0)) << "    ";
+    }
+    cout << instruction.at(1);
+    printSpaces(8 - instruction.at(1).length());
+    cout << instruction.at(2);
+}
+
 int main(int argc, char** argv) {
     if(argc == 1) {
         cout << "Invalid number of arguments; received 0, expected at least 1." << endl;
@@ -317,8 +356,8 @@ int main(int argc, char** argv) {
 
     //REMEMBER TO USE .substr(1) ON INSTRUCTION WHEN SEARCHING THROUGH EITHER OF THESE LISTS
     //Initialize a vector containing all assembler directives
-    set<string> assemblerDirectives{"START", "END", "RESB", "RESW", "BYTE", "WORD",
-                                              "BASE", "*", "LTORG", "ORG", "EQU", "USE"};
+    set<string> assemblerDirectives{"START", "END", "RESB", "RESW", "BYTE", "WORD", "BASE",
+                                    "NOBASE", "*", "LTORG", "ORG", "EQU", "USE"};
     //Initialize a hashmap to store all instructions, opcodes, and formats
     //Call first for opcode, second for format
     unordered_map<string, pair<int, int>> opTable = createOPTable();
@@ -386,38 +425,47 @@ int main(int argc, char** argv) {
 
         //Print instruction information (address, label, instruction, operand)
         //Don't print address if the instruction is 'END'
-        if(instruction[2] == " END") {
-            cout << "        ";
-        } else {
-            cout << uppercase << hex << setw(4) << setfill('0') << stoi(instruction.at(0)) << "    ";
-        }
-        cout << instruction.at(1);
-        printSpaces(8 - instruction.at(1).length());
-        cout << instruction.at(2);
+
 
         //Check if the current instruction is a literal definition
         if(instruction.at(1) == "*") {
+            printInstruction(instruction);
             printSpaces(35 - instruction.at(2).length());
             cout << symbolTable.getLiteralInfo(instruction.at(2))[0] << endl;
             continue;
         }
 
-        printSpaces(9 - instruction.at(2).length());
-        cout << instruction.at(3);
-
         //Print object code of instruction
         if(assemblerDirectives.find(instruction.at(2).substr(1)) == assemblerDirectives.end()) {
             //Current instruction is not an assembler directive, convert instruction to object code and print
             instruction[0] = instructions.at(i + 1)[0];
-            unsigned int objectCode = convertInstructionToObjectCode(instruction, &data, &opTable);
+            unsigned int objectCode = convertInstructionToObjectCode(&instruction, &data, &opTable);
 
             //Number of characters displayed in object code depends on format
             int format = opTable.at(instruction.at(2).substr(1)).second;
             if(instruction.at(2)[0] == '+') format++;
 
+
+            printInstruction(instruction);
+            printSpaces(9 - instruction.at(2).length());
+            cout << instruction.at(3);
+
             printSpaces(26 - instruction.at(3).length());
             cout << uppercase << hex << setw(2 * format) << setfill('0') << objectCode << endl;
         } else {
+            //Check for assembler directives, certain directives must be processed in pass two
+            if(instruction.at(2) == " BASE") {
+                unsigned int value = convertOperandToTargetAddress(instruction.at(3), &data);
+                data.baseRegister = value;
+            }
+            if(instruction.at(2) == " NOBASE") {
+                data.baseRegister = -1;
+            }
+
+            printInstruction(instruction);
+            printSpaces(9 - instruction.at(2).length());
+            cout << instruction.at(3);
+
             cout << endl;
         }
     }
