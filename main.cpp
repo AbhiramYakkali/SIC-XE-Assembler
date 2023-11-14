@@ -140,7 +140,7 @@ unsigned int convertOperandToTargetAddress(const string& operand, Data* data) {
 }
 
 //Process assembler directives, updating address counter and symbol table as necessary
-void processAssemblerDirective(vector<string>* lineParts, Data* data) {
+void processAssemblerDirective(vector<string>* lineParts, Data* data, vector<vector<string>>* instructions) {
     string label = lineParts->at(0);
     string instruction = lineParts->at(1).substr(1);
     //TODO: Handle operands not being numbers
@@ -155,8 +155,8 @@ void processAssemblerDirective(vector<string>* lineParts, Data* data) {
     }
     if(instruction == "END") {
         //End of program, call command to pool literals at the current address
-        data->symbolTable->setLiteralsAtAddress(data->currentAddress);
         data->symbolTable->setLengthOfProgram(data->currentAddress);
+        data->currentAddress = data->symbolTable->setLiteralsAtAddress(data->currentAddress, instructions);
     }
     if(instruction == "RESW") {
         //Reserve word instruction, increment address counter by 3 times operand
@@ -351,11 +351,13 @@ int main(int argc, char** argv) {
 
         //Add current instruction to instructions vector (to be used in pass two)
         vector<string> instruction{to_string(data.currentAddress), lineParts.at(0), lineParts.at(1), lineParts.at(2)};
-        instructions.push_back(instruction);
+
 
         if(assemblerDirectives.find(lineParts.at(1).substr(1)) != assemblerDirectives.end()) {
             //The current instruction is an assembler directive, must be processed
-            processAssemblerDirective(&lineParts, &data);
+            processAssemblerDirective(&lineParts, &data, &instructions);
+
+            instructions.push_back(instruction);
         } else {
             //Current instruction is not an assembler directive
             //Check if current instruction is a symbol, add it to the symbol table if so
@@ -367,6 +369,8 @@ int main(int argc, char** argv) {
             if(lineParts.at(2)[0] == '=') {
                 symbolTable.addLiteral(lineParts.at(2));
             }
+
+            instructions.push_back(instruction);
 
             //Increment address counter
             data.currentAddress += opTable[lineParts.at(1).substr(1)].second;
@@ -381,10 +385,23 @@ int main(int argc, char** argv) {
         vector<string> instruction = instructions.at(i);
 
         //Print instruction information (address, label, instruction, operand)
-        cout << uppercase << hex << setw(4) << setfill('0') << stoi(instruction.at(0)) << "    ";
+        //Don't print address if the instruction is 'END'
+        if(instruction[2] == " END") {
+            cout << "        ";
+        } else {
+            cout << uppercase << hex << setw(4) << setfill('0') << stoi(instruction.at(0)) << "    ";
+        }
         cout << instruction.at(1);
         printSpaces(8 - instruction.at(1).length());
         cout << instruction.at(2);
+
+        //Check if the current instruction is a literal definition
+        if(instruction.at(1) == "*") {
+            printSpaces(35 - instruction.at(2).length());
+            cout << symbolTable.getLiteralInfo(instruction.at(2))[0] << endl;
+            continue;
+        }
+
         printSpaces(9 - instruction.at(2).length());
         cout << instruction.at(3);
 

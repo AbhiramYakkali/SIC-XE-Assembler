@@ -85,7 +85,7 @@ void SymbolTable::addLiteral(string literal) {
         //Literal is a hexadecimal number
 
         literals->push_back(literal);
-        literalInfo->push_back({static_cast<unsigned int>(stoi(content, nullptr, 16)), 0, static_cast<unsigned int>(content.length())});
+        literalInfo->push_back({static_cast<unsigned int>(stoi(content, nullptr, 16)), 0, static_cast<unsigned int>(content.length() / 2)});
     }
 }
 vector<unsigned int> SymbolTable::getLiteralInfo(string literalName) {
@@ -105,19 +105,25 @@ vector<unsigned int> SymbolTable::getLiteralInfo(string literalName) {
         return literalInfo->at(index);
     }
 }
-void SymbolTable::setLiteralsAtAddress(unsigned int address) {
+//Pools literals at the designated address
+//Returns the new address after all literals have been pooled
+//Alters the vector containing instructions to include the pooled literals
+unsigned int SymbolTable::setLiteralsAtAddress(unsigned int address, vector<vector<string>>* instructions) {
     //Literals being pooled at the defined address
     //Iterate through the current literal pool, find ones not bound to an address, and pool them here
     unsigned int currentAddress = address;
-    for(auto & i : *literalInfo) {
-        if(i[1] == 0) {
-            i[1] = currentAddress;
-            currentAddress += i[2];
+    for(int i = 0; i < literals->size(); i++) {
+        vector<unsigned int>* litInfo = &literalInfo->at(i);
+
+        if(litInfo->at(1) == 0) {
+            litInfo->at(1) = currentAddress;
+            vector<string> instruction{to_string(currentAddress), "*", literals->at(i), ""};
+            instructions->push_back(instruction);
+            currentAddress += litInfo->at(2);
         }
     }
 
-    //TODO: Find some way to add literals to the list of instructions so they are printed in the listing file
-    //TODO: Also find a way to increment the address counter in the assembler (pass in data object)
+    return currentAddress;
 }
 
 void SymbolTable::printSymbols() {
