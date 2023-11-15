@@ -4,6 +4,7 @@
 #include <set>
 #include <iomanip>
 #include <unordered_map>
+#include <sstream>
 
 #include "data.h"
 
@@ -107,6 +108,15 @@ unordered_map<string, pair<int, int>> createOPTable() {
     return opTable;
 }
 
+//Checks if the given string is a number or not
+bool isStringANumber(string str) {
+    istringstream iss(str);
+    int num;
+    iss >> num;
+
+    return iss.eof() && !iss.fail();
+}
+
 //Takes an operand (immediate operand, label, etc.) and converts it to target address
 unsigned int convertOperandToTargetAddress(const string& operand, Data* data) {
     //In case of ',X' being present in operand, ignore it
@@ -114,8 +124,56 @@ unsigned int convertOperandToTargetAddress(const string& operand, Data* data) {
     //Isolate first character because it usually indicates what type of operand this is
     char firstChar = shortenedOperand[0];
 
-    //TODO: Handle operand being a number (useful for START, RESB, RESW, etc.)
-    //TODO: Handle operand being an expression combining numbers or symbols
+    //Check if operand is a number
+    if(isStringANumber(shortenedOperand)) return stoi(shortenedOperand);
+
+    //Check if operand is an expression
+    string operations = "+-*/";
+    for(char op : operations) {
+        int index = shortenedOperand.find(op);
+        if(index != string::npos) {
+            //The string contains the operation being checked
+            string operand1 = shortenedOperand.substr(0, index);
+            string operand2 = shortenedOperand.substr(index + 1);
+
+            //Convert string operands into numbers
+            //If the operand is a number, treat it as a number; otherwise, treat it as a symbol
+            unsigned int convertedOperand1, convertedOperand2;
+            //Keep track of the number of relative terms (certain operations can't be performed with certain number of relative terms)
+            int numOfRelative = 0;
+
+            if(isStringANumber(operand1)) {
+                convertedOperand1 = stoi(operand1);
+            } else {
+                pair<unsigned int, bool> operandInfo = data->symbolTable->getSymbolInfo(operand1);
+                convertedOperand1 = operandInfo.first;
+                if(operandInfo.second) numOfRelative++;
+            }
+            if(isStringANumber(operand2)) {
+                convertedOperand2 = stoi(operand2);
+            } else {
+                pair<unsigned int, bool> operandInfo = data->symbolTable->getSymbolInfo(operand2);
+                convertedOperand2 = operandInfo.first;
+                if(operandInfo.second) numOfRelative++;
+            }
+
+            //Perform specified operations, carry out necessary checks (based on number of relative terms)
+            //TODO: Perform error checking based on number of relative terms
+            if(op == '+') {
+                return convertedOperand1 + convertedOperand2;
+            }
+            if(op == '-') {
+                return convertedOperand1 - convertedOperand2;
+            }
+            if(op == '*') {
+                return convertedOperand1 - convertedOperand2;
+            }
+            if(op == '/') {
+                return convertedOperand1 / convertedOperand2;
+            }
+        }
+    }
+
     if(firstChar == 'C' || firstChar == 'X') {
         //This is an operand of format X'F1' or C'EOF'
         //Use SymbolTable function to find its value
@@ -508,7 +566,7 @@ int main(int argc, char** argv) {
             if(instruction.at(2) == " NOBASE") {
                 data.baseRegister = -1;
             }
-
+            //TODO: Print converted values of BYTE and WORD instructions
             printInstruction(instruction);
             printSpaces(9 - instruction.at(2).length());
             cout << instruction.at(3);
