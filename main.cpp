@@ -22,11 +22,7 @@ string removeSpaces(const string& str) {
     size_t lastNonSpaceCharacter = str.find_last_not_of(' ');
     string output;
 
-    if(lastNonSpaceCharacter == 0) {
-        output = "";
-    } else {
-        output = str.substr(0, lastNonSpaceCharacter + 1);
-    }
+    output = str.substr(0, lastNonSpaceCharacter + 1);
 
     return output;
 }
@@ -115,10 +111,18 @@ unordered_map<string, pair<int, int>> createOPTable() {
 unsigned int convertOperandToTargetAddress(const string& operand, Data* data) {
     //In case of ',X' being present in operand, ignore it
     string shortenedOperand = operand.substr(0, operand.find(','));
+    //Isolate first character because it usually indicates what type of operand this is
+    char firstChar = shortenedOperand[0];
 
     //TODO: Handle operand being a number (useful for START, RESB, RESW, etc.)
-
-    if(shortenedOperand[0] == '#') {
+    //TODO: Handle operand being an expression combining numbers or symbols
+    if(firstChar == 'C' || firstChar == 'X') {
+        //This is an operand of format X'F1' or C'EOF'
+        //Use SymbolTable function to find its value
+        return data->symbolTable->getValue(shortenedOperand);
+    }
+    if(shortenedOperand == "*") return data->currentAddress;
+    if(firstChar == '#') {
         //Immediate addressing
         //Check if symbol table contains the operand, if it doesn't, assume the operand is a number
         pair<int, bool> symbolInfo = data->symbolTable->getSymbolInfo(shortenedOperand.substr(1));
@@ -129,11 +133,11 @@ unsigned int convertOperandToTargetAddress(const string& operand, Data* data) {
             return symbolInfo.first;
         }
     }
-    if(shortenedOperand[0] == ' ' || shortenedOperand[0] == '@') {
+    if(firstChar == ' ' || shortenedOperand[0] == '@') {
         //Simple/Indirect addressing, get symbol address from symbol table and return
         return data->symbolTable->getSymbolInfo(shortenedOperand.substr(1)).first;
     }
-    if(shortenedOperand[0] == '=') {
+    if(firstChar == '=') {
         return data->symbolTable->getLiteralInfo(shortenedOperand).at(1);
     }
 }
@@ -143,13 +147,14 @@ void processAssemblerDirective(vector<string>* lineParts, Data* data, vector<vec
     string label = lineParts->at(0);
     string instruction = lineParts->at(1).substr(1);
     string operand = lineParts->at(2);
-    int targetAddress = convertOperandToTargetAddress(operand, data);
+    int targetAddress;
+    if(!operand.empty()) targetAddress = convertOperandToTargetAddress(operand, data);
 
     int address = data->currentAddress;
     SymbolTable* symbolTable = data->symbolTable;
 
     if(instruction == "START") {
-        data->currentAddress = stoi(operand);
+        data->currentAddress = stoi(operand, nullptr, 16);
         data->symbolTable->setCSECT(label, stoi(operand));
     }
     if(instruction == "END") {
@@ -178,6 +183,10 @@ void processAssemblerDirective(vector<string>* lineParts, Data* data, vector<vec
         //Word instruction, increment address counter by three
         symbolTable->addSymbol(label, address, false);
         data->currentAddress += 3;
+    }
+    if(instruction == "LTORG") {
+        //LTORG instruction, pool all unpooled literals at the current address
+        symbolTable->setLiteralsAtAddress(data->currentAddress, instructions);
     }
 
     //TODO: Handle all other assembler directives
@@ -429,12 +438,19 @@ int main(int argc, char** argv) {
 
         if(assemblerDirectives.find(lineParts.at(1).substr(1)) != assemblerDirectives.end()) {
             //The current instruction is an assembler directive, must be processed
-            processAssemblerDirective(&lineParts, &data, &instructions);
+            if(lineParts.at(1).substr(1) == "LTORG") {
+                //LTORG directive should be printed before the literals, so print LTORG first
+                instructions.push_back(instruction);
 
-            instructions.push_back(instruction);
+                processAssemblerDirective(&lineParts, &data, &instructions);
+            } else {
+                processAssemblerDirective(&lineParts, &data, &instructions);
+
+                instructions.push_back(instruction);
+            }
         } else {
             //Current instruction is not an assembler directive
-            //Check if current instruction is a symbol, add it to the symbol table if so
+            //Check if current instruction contains a label, add it to the symbol table if so
             if(!lineParts.at(0).empty()) {
                 symbolTable.addSymbol(lineParts.at(0), data.currentAddress, true);
             }

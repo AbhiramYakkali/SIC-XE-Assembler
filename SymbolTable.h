@@ -18,6 +18,8 @@ public:
     SymbolTable();
     ~SymbolTable();
 
+    unsigned int getValue(string operand);
+
     void addSymbol(const string& symbolName, int address, bool relative);
     pair<int, bool> getSymbolInfo(const string& symbolName);
 

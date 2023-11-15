@@ -58,34 +58,46 @@ pair<int, bool> SymbolTable::getSymbolInfo(const std::string& symbolName) {
     }
 }
 
+
+
 //Used to isolate the content of the literal (value between apostrophes)
 string isolateLiteralContent(const string& literal) {
     size_t start = literal.find('\'') + 1;
     size_t end = literal.find('\'', start);
     return literal.substr(start, end - start);
 }
-
-void SymbolTable::addLiteral(string literal) {
+//Converts a string such as X'F1' or C'EOF' to an unsigned int corresponding to its value
+unsigned int SymbolTable::getValue(string operand) {
     //Isolate the characters within the apostrophes
-    string content = isolateLiteralContent(literal);
+    string content = isolateLiteralContent(operand);
 
-    if(literal[1] == 'C') {
-        //Literal is a string
-
+    if(operand[1] == 'C') {
+        //Operand refers to a string
         //Iterate through the content and get the hex representation of the string
         unsigned int value = 0;
         for(char c : content) {
             value <<= 8;
             value += static_cast<int>(c);
         }
+        return value;
+    } else if(operand[1] == 'X') {
+        //Operand is a hexadecimal number
+        return static_cast<unsigned int>(stoi(content, nullptr, 16));
+    }
+}
 
-        literals->push_back(literal);
+void SymbolTable::addLiteral(string literal) {
+    //Isolate the characters within the apostrophes
+    string content = isolateLiteralContent(literal);
+    unsigned int value = getValue(literal);
+    literals->push_back(literal);
+
+    if(literal[1] == 'C') {
+        //Literal is a string
         literalInfo->push_back({value, 0, static_cast<unsigned int>(content.length())});
     } else if(literal[1] == 'X') {
         //Literal is a hexadecimal number
-
-        literals->push_back(literal);
-        literalInfo->push_back({static_cast<unsigned int>(stoi(content, nullptr, 16)), 0, static_cast<unsigned int>(content.length() / 2)});
+        literalInfo->push_back({value, 0, static_cast<unsigned int>(content.length() / 2)});
     }
 }
 vector<unsigned int> SymbolTable::getLiteralInfo(string literalName) {
