@@ -11,6 +11,8 @@
 #define NORMAL_EXIT 0
 #define BAD_EXIT 1
 
+unsigned int convertInstructionToObjectCode(vector<string>* instruction, Data* data);
+
 //Helper function to print a specified number of spaces
 void printSpaces(int number) {
     for(int i = 0; i < number; i++) {
@@ -35,7 +37,8 @@ vector<string> separateSourceLine(const string& line) {
 
     output.push_back(removeSpaces(line.substr(0, 9)));
     output.push_back(removeSpaces(line.substr(9, 7)));
-    output.push_back(removeSpaces(line.substr(17, 17)));
+    if(line.length() < 17) output.emplace_back("");
+    else output.push_back(removeSpaces(line.substr(17, 17)));
 
     return output;
 }
@@ -109,7 +112,7 @@ unordered_map<string, pair<int, int>> createOPTable() {
 }
 
 //Checks if the given string is a number or not
-bool isStringANumber(string str) {
+bool isStringANumber(const string& str) {
     istringstream iss(str);
     int num;
     iss >> num;
@@ -181,7 +184,7 @@ unsigned int convertOperandToTargetAddress(const string& operand, Data* data) {
     if((shortenedOperand[1] == 'C' || shortenedOperand[1] == 'X') && shortenedOperand[2] == '\'') {
         //This is an operand of format X'F1' or C'EOF'
         //Use SymbolTable function to find its value
-        return data->symbolTable->getValue(shortenedOperand);
+        return SymbolTable::getValue(shortenedOperand);
     }
     if(shortenedOperand == "*") return data->currentAddress;
     if(firstChar == '#') {
@@ -218,7 +221,7 @@ void processAssemblerDirective(vector<string>* lineParts, Data* data, vector<vec
     }
     if(instruction == "END") {
         //End of program, call command to pool literals at the current address
-        data->currentAddress = data->symbolTable->setLiteralsAtAddress(data->currentAddress, instructions);
+        data->currentAddress = data->symbolTable->setLiteralsAtAddress(data->currentAddress, instructions, &data->currentAddress);
     }
     if(instruction == "RESW") {
         //Reserve word instruction, increment address counter by 3 times operand
@@ -244,7 +247,7 @@ void processAssemblerDirective(vector<string>* lineParts, Data* data, vector<vec
     }
     if(instruction == "LTORG") {
         //LTORG instruction, pool all unpooled literals at the current address
-        symbolTable->setLiteralsAtAddress(data->currentAddress, instructions);
+        symbolTable->setLiteralsAtAddress(data->currentAddress, instructions, &data->currentAddress);
     }
 
     //TODO: Handle all other assembler directives
@@ -344,30 +347,47 @@ string convertNumberToHex(unsigned int number, int requiredLength) {
     return stream.str();
 }
 
-//Increments the target addresses in all instructions with a TA after 'address'
+//Recalculates object codes for all prior instructions that refer to a symbol
 //Used when a format 3 instruction is converted to format 4 in pass two
-void incrementAddressesInInstructions(unsigned int address, Data* data) {
+void recalculateInstructionObjectCodes(unsigned int addressOfLastInstruction, Data* data) {
     vector<vector<string>>* instructions = data->convertedInstructions;
     vector<pair<unsigned int, bool>>* targetAddresses = data->targetAddresses;
 
     for(int i = 0; i < instructions->size(); i++) {
-        //Check if the target address of this instruction is greater than the specified address
         pair<unsigned int, bool> targetAddress = targetAddresses->at(i);
         vector<string>* instruction = &instructions->at(i);
 
-        if(targetAddress.second && targetAddress.first + 1 >= address) {
-            //Conditions met, increment the target address (disp/address) in this instruction
-            unsigned int address = stoi(instruction->at(4), nullptr, 16);
-            address++;
-            instruction->at(4) = convertNumberToHex(address, instruction->at(4).length());
+        //BASE and NOBASE instructions should be processed here to make sure base register is kept up to date
+        if(instruction->at(2) == " BASE") {
+            data->baseRegister = convertOperandToTargetAddress(instruction->at(3), data);
+        }
+        if(instruction->at(2) == " NOBASE") {
+            data->baseRegister = -1;
+        }
+
+        if(targetAddress.second) {
+            string instructionAddress = instruction->at(0);
+
+            //Set address of the current instruction to the address of the next instruction temporarily
+            if(i == instructions->size() - 1) {
+                instruction->at(0) = to_string(addressOfLastInstruction);
+            } else {
+                instruction->at(0) = instructions->at(i + 1).at(0);
+            }
+
+            unsigned int newObjectCode = convertInstructionToObjectCode(instruction, data);
+            instruction->at(4) = convertNumberToHex(newObjectCode, instruction->at(4).length());
+            instruction->at(0) = instructionAddress;
         }
     }
 }
 
 //Processes given instruction and returns object code
 //Vector of size 4 stores instruction information: address, label, instruction, operand
-unsigned int convertInstructionToObjectCode(vector<string>* instruction, Data* data, unordered_map<string,
-                                            pair<int, int>>* opTable, vector<pair<unsigned int, bool>>* targetAddresses) {
+unsigned int convertInstructionToObjectCode(vector<string>* instruction, Data* data) {
+    unordered_map<string, pair<int, int>>* opTable = data->opTable;
+    vector<pair<unsigned int, bool>>* targetAddresses = data->targetAddresses;
+
     pair<int, int> instructionInfo = opTable->at(instruction->at(2).substr(1));
     int format = instructionInfo.second;
     unsigned int objectCode;
@@ -457,7 +477,7 @@ unsigned int convertInstructionToObjectCode(vector<string>* instruction, Data* d
         //Remove element corresponding to this instruction from targetAddresses queue
         //Will be added back in format 4 handling
         targetAddresses->pop_back();
-        incrementAddressesInInstructions(address, data);
+        recalculateInstructionObjectCodes(address, data);
         targetAddress = convertOperandToTargetAddress(instruction->at(3), data);
     }
     if(format == 4) {
@@ -510,6 +530,7 @@ int main(int argc, char** argv) {
     data.additionalAddressCounter = 0;
     data.baseRegister = -1;
     data.symbolTable = &symbolTable;
+    data.opTable = &opTable;
 
     //Vector to store data on instructions along with their calculated addresses
     //Allows pass two to skip reading the file and recalculating addresses, ignoring comments, etc.
@@ -571,8 +592,8 @@ int main(int argc, char** argv) {
 
     //Pass two of assembler
     //Convert instructions to object code, print to output file
-    for(int i = 0; i < instructions.size(); i++) {
-        vector<string> instruction = instructions.at(i);
+    for(auto & i : instructions) {
+        vector<string> instruction = i;
         vector<string> convertedInstruction;
         unsigned int address = stoi(instruction[0], nullptr, 16);
         address += data.additionalAddressCounter;
@@ -592,8 +613,8 @@ int main(int argc, char** argv) {
         //Calculate object code of instruction, or process relevant assembler directives
         if(assemblerDirectives.find(instruction.at(2).substr(1)) == assemblerDirectives.end()) {
             //Current instruction is not an assembler directive, convert instruction to object code and print
-            instruction[0] = instructions.at(i + 1)[0];
-            unsigned int objectCode = convertInstructionToObjectCode(&instruction, &data, &opTable, &targetAddresses);
+            //instruction[0] = instructions.at(i + 1)[0];
+            unsigned int objectCode = convertInstructionToObjectCode(&instruction, &data);
             //Update instruction in convertedInstruction in case format was switched to 4
             convertedInstruction[2] = instruction[2];
 
@@ -601,7 +622,7 @@ int main(int argc, char** argv) {
             int format = opTable.at(instruction.at(2).substr(1)).second;
             if(instruction.at(2)[0] == '+') format++;
 
-            instruction[0] = instructions.at(i)[0];
+            instruction[0] = i[0];
 
             convertedInstruction.push_back(instruction.at(3));
 

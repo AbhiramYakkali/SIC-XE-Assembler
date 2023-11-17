@@ -11,4 +11,5 @@ typedef struct {
 
     vector<vector<string>>* convertedInstructions;
     vector<pair<unsigned int, bool>>* targetAddresses;
+    unordered_map<string, pair<int, int>>* opTable;
 } Data;

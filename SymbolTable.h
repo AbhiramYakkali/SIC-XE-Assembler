@@ -26,7 +26,7 @@ public:
 
     void addLiteral(string literal);
     vector<unsigned int> getLiteralInfo(const string& literalName);
-    unsigned int setLiteralsAtAddress(unsigned int address, vector<vector<string>>* instructions);
+    unsigned int setLiteralsAtAddress(unsigned int address, vector<vector<string>>* instructions, int* addressCounter);
 
     void setCSECT(string name, int address);
     void setLengthOfProgram(int length);

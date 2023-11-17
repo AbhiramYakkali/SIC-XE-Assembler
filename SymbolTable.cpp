@@ -153,7 +153,7 @@ vector<unsigned int> SymbolTable::getLiteralInfo(const string& literalName) {
 //Pools literals at the designated address
 //Returns the new address after all literals have been pooled
 //Alters the vector containing instructions to include the pooled literals
-unsigned int SymbolTable::setLiteralsAtAddress(unsigned int address, vector<vector<string>>* instructions) {
+unsigned int SymbolTable::setLiteralsAtAddress(unsigned int address, vector<vector<string>>* instructions, int* addressCounter) {
     //Literals being pooled at the defined address
     //Iterate through the current literal pool, find ones not bound to an address, and pool them here
     unsigned int currentAddress = address;
@@ -165,6 +165,7 @@ unsigned int SymbolTable::setLiteralsAtAddress(unsigned int address, vector<vect
             vector<string> instruction{to_string(currentAddress), "*", literals->at(i), ""};
             instructions->push_back(instruction);
             currentAddress += litInfo->at(2);
+            *addressCounter += litInfo->at(2);
         }
     }
 
