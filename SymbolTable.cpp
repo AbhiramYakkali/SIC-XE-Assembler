@@ -38,7 +38,7 @@ void addSpaces(int number) {
 }
 
 //Checks if the given string is a number or not
-bool isStringNumber(string str) {
+bool isStringNumber(const string& str) {
     istringstream iss(str);
     int num;
     iss >> num;
@@ -133,7 +133,7 @@ void SymbolTable::addLiteral(string literal) {
         literalInfo->push_back({value, 0, length});
     }
 }
-vector<unsigned int> SymbolTable::getLiteralInfo(string literalName) {
+vector<unsigned int> SymbolTable::getLiteralInfo(const string& literalName) {
     //Find index of desired literal in literals list
     int index = -1;
     for(int i = 0; i < literals->size(); i++) {

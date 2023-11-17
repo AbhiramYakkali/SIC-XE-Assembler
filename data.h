@@ -8,4 +8,7 @@ typedef struct {
     int additionalAddressCounter;
 
     SymbolTable* symbolTable;
+
+    vector<vector<string>>* convertedInstructions;
+    vector<pair<unsigned int, bool>>* targetAddresses;
 } Data;

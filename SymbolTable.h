@@ -18,14 +18,14 @@ public:
     SymbolTable();
     ~SymbolTable();
 
-    unsigned int getValue(string operand);
+    static unsigned int getValue(string operand);
 
     void addSymbol(const string& symbolName, int address, bool relative);
     pair<int, bool> getSymbolInfo(const string& symbolName);
     void incrementSymbolAddresses(unsigned int address);
 
     void addLiteral(string literal);
-    vector<unsigned int> getLiteralInfo(string literalName);
+    vector<unsigned int> getLiteralInfo(const string& literalName);
     unsigned int setLiteralsAtAddress(unsigned int address, vector<vector<string>>* instructions);
 
     void setCSECT(string name, int address);

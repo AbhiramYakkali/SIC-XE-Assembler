@@ -337,9 +337,37 @@ pair<bool, unsigned int> testDirectAddressing(unsigned int targetAddress, unsign
     }
 }
 
+//Helper function to convert a number to a string in hex format
+string convertNumberToHex(unsigned int number, int requiredLength) {
+    stringstream stream;
+    stream << uppercase << hex << setw(requiredLength) << setfill('0') << number;
+    return stream.str();
+}
+
+//Increments the target addresses in all instructions with a TA after 'address'
+//Used when a format 3 instruction is converted to format 4 in pass two
+void incrementAddressesInInstructions(unsigned int address, Data* data) {
+    vector<vector<string>>* instructions = data->convertedInstructions;
+    vector<pair<unsigned int, bool>>* targetAddresses = data->targetAddresses;
+
+    for(int i = 0; i < instructions->size(); i++) {
+        //Check if the target address of this instruction is greater than the specified address
+        pair<unsigned int, bool> targetAddress = targetAddresses->at(i);
+        vector<string>* instruction = &instructions->at(i);
+
+        if(targetAddress.second && targetAddress.first + 1 >= address) {
+            //Conditions met, increment the target address (disp/address) in this instruction
+            unsigned int address = stoi(instruction->at(4), nullptr, 16);
+            address++;
+            instruction->at(4) = convertNumberToHex(address, instruction->at(4).length());
+        }
+    }
+}
+
 //Processes given instruction and returns object code
 //Vector of size 4 stores instruction information: address, label, instruction, operand
-unsigned int convertInstructionToObjectCode(vector<string>* instruction, Data* data, unordered_map<string, pair<int, int>>* opTable) {
+unsigned int convertInstructionToObjectCode(vector<string>* instruction, Data* data, unordered_map<string,
+                                            pair<int, int>>* opTable, vector<pair<unsigned int, bool>>* targetAddresses) {
     pair<int, int> instructionInfo = opTable->at(instruction->at(2).substr(1));
     int format = instructionInfo.second;
     unsigned int objectCode;
@@ -348,7 +376,10 @@ unsigned int convertInstructionToObjectCode(vector<string>* instruction, Data* d
 
     //Don't calculate target address for format 3/4 instructions
     if(format == 3 || format == 4)  {
-        if(instruction->at(2) == " RSUB") return 0x4F0000;
+        if(instruction->at(2) == " RSUB") {
+            targetAddresses->emplace_back(0, false);
+            return 0x4F0000;
+        }
         else targetAddress = convertOperandToTargetAddress(instruction->at(3), data);
     }
 
@@ -360,12 +391,14 @@ unsigned int convertInstructionToObjectCode(vector<string>* instruction, Data* d
 
     if(format == 1) {
         //Format 1: object code = opcode
+        targetAddresses->emplace_back(0, false);
         return instructionInfo.first;
     } else if(format == 2) {
         //Format 2: object code = opcode (8 bits) + r1 (4 bits) + r2 (4 bits)
         objectCode = instructionInfo.first;
         objectCode = addBits(objectCode, registerNumbers[instruction->at(3)[1]]);
         objectCode = addBits(objectCode, registerNumbers[instruction->at(3)[3]]);
+        targetAddresses->emplace_back(0, false);
         return objectCode;
     } else if(format == 3) {
         //Format 3: opcode (6) + n i x b p e + disp (12)
@@ -383,6 +416,7 @@ unsigned int convertInstructionToObjectCode(vector<string>* instruction, Data* d
         int address = stoi(instruction->at(0));
 
         if(instruction->at(3)[0] == '#') {
+            targetAddresses->emplace_back(0, false);
             //Using immediate addressing
             //Addressing mode order: direct, PC relative, base relative
 
@@ -398,6 +432,7 @@ unsigned int convertInstructionToObjectCode(vector<string>* instruction, Data* d
             result = testBaseRelativeAddressing(targetAddress, data->baseRegister, objectCode);
             if(result.first) return result.second;
         } else {
+            targetAddresses->emplace_back(targetAddress, true);
             //Simple/indirect addressing
             //Addressing mode order: PC relative, base relative, direct
 
@@ -418,10 +453,17 @@ unsigned int convertInstructionToObjectCode(vector<string>* instruction, Data* d
         format = 4;
         instruction->at(2)[0] = '+';
         data->additionalAddressCounter++;
-        data->symbolTable->incrementSymbolAddresses(stoi(instruction->at(0)));
+        data->symbolTable->incrementSymbolAddresses(address);
+        //Remove element corresponding to this instruction from targetAddresses queue
+        //Will be added back in format 4 handling
+        targetAddresses->pop_back();
+        incrementAddressesInInstructions(address, data);
+        targetAddress = convertOperandToTargetAddress(instruction->at(3), data);
     }
     if(format == 4) {
         //Format 4: opcode (6) + n i x b p e + address (20)
+        targetAddresses->emplace_back(targetAddress, true);
+
         objectCode = instructionInfo.first;
         objectCode >>= 2;
 
@@ -439,13 +481,6 @@ unsigned int convertInstructionToObjectCode(vector<string>* instruction, Data* d
         objectCode = addNumber(objectCode, targetAddress, 20);
         return objectCode;
     }
-}
-
-//Helper function to convert a number to a string in hex format
-string convertNumberToHex(unsigned int number, int requiredLength) {
-    stringstream stream;
-    stream << uppercase << hex << setw(requiredLength) << setfill('0') << number;
-    return stream.str();
 }
 
 int main(int argc, char** argv) {
@@ -531,6 +566,8 @@ int main(int argc, char** argv) {
     //Contains pairs representing the target address of each instruction in convertedInstructions
     //bool marks if the targetAddress refers to an actual address or if it's just a number
     vector<pair<unsigned int, bool>> targetAddresses;
+    data.convertedInstructions = &convertedInstructions;
+    data.targetAddresses = &targetAddresses;
 
     //Pass two of assembler
     //Convert instructions to object code, print to output file
@@ -556,7 +593,7 @@ int main(int argc, char** argv) {
         if(assemblerDirectives.find(instruction.at(2).substr(1)) == assemblerDirectives.end()) {
             //Current instruction is not an assembler directive, convert instruction to object code and print
             instruction[0] = instructions.at(i + 1)[0];
-            unsigned int objectCode = convertInstructionToObjectCode(&instruction, &data, &opTable);
+            unsigned int objectCode = convertInstructionToObjectCode(&instruction, &data, &opTable, &targetAddresses);
             //Update instruction in convertedInstruction in case format was switched to 4
             convertedInstruction[2] = instruction[2];
 
@@ -598,6 +635,8 @@ int main(int argc, char** argv) {
             } else {
                 convertedInstruction.emplace_back("");
             }
+
+            targetAddresses.emplace_back(0, false);
         }
 
         convertedInstructions.push_back(convertedInstruction);
