@@ -127,6 +127,10 @@ unsigned int convertOperandToTargetAddress(const string& operand, Data* data) {
     //Check if operand is a number
     if(isStringANumber(shortenedOperand)) return stoi(shortenedOperand);
 
+    if(firstChar == '=') {
+        //Operand is a literal, get address from symbol table
+        return data->symbolTable->getLiteralInfo(shortenedOperand).at(1);
+    }
     //Check if operand is an expression
     string operations = "+-*/";
     for(char op : operations) {
@@ -174,7 +178,7 @@ unsigned int convertOperandToTargetAddress(const string& operand, Data* data) {
         }
     }
 
-    if(firstChar == 'C' || firstChar == 'X') {
+    if((shortenedOperand[1] == 'C' || shortenedOperand[1] == 'X') && shortenedOperand[2] == '\'') {
         //This is an operand of format X'F1' or C'EOF'
         //Use SymbolTable function to find its value
         return data->symbolTable->getValue(shortenedOperand);
@@ -191,12 +195,9 @@ unsigned int convertOperandToTargetAddress(const string& operand, Data* data) {
             return symbolInfo.first;
         }
     }
-    if(firstChar == ' ' || shortenedOperand[0] == '@') {
+    if(firstChar == ' ' || firstChar == '@') {
         //Simple/Indirect addressing, get symbol address from symbol table and return
         return data->symbolTable->getSymbolInfo(shortenedOperand.substr(1)).first;
-    }
-    if(firstChar == '=') {
-        return data->symbolTable->getLiteralInfo(shortenedOperand).at(1);
     }
 }
 
@@ -439,16 +440,11 @@ unsigned int convertInstructionToObjectCode(vector<string>* instruction, Data* d
     }
 }
 
-//Prints address, label, instruction, and operand of a given line of code
-void printInstruction(vector<string> instruction) {
-    if(instruction[2] == " END") {
-        cout << "        ";
-    } else {
-        cout << uppercase << hex << setw(4) << setfill('0') << stoi(instruction.at(0)) << "    ";
-    }
-    cout << instruction.at(1);
-    printSpaces(8 - instruction.at(1).length());
-    cout << instruction.at(2);
+//Helper function to convert a number to a string in hex format
+string convertNumberToHex(unsigned int number, int requiredLength) {
+    stringstream stream;
+    stream << uppercase << hex << setw(requiredLength) << setfill('0') << number;
+    return stream.str();
 }
 
 int main(int argc, char** argv) {
@@ -527,20 +523,31 @@ int main(int argc, char** argv) {
         }
     }
 
+    //Vector containing instructions after making any necessary changes in pass two
+    //Vector contains: address, label, instruction, operand, object code
+    vector<vector<string>> convertedInstructions;
+    //Contains pairs representing the target address of each instruction in convertedInstructions
+    //bool marks if the targetAddress refers to an actual address or if it's just a number
+    vector<pair<unsigned int, bool>> targetAddresses;
+
     //Pass two of assembler
     //Convert instructions to object code, print to output file
     for(int i = 0; i < instructions.size(); i++) {
         vector<string> instruction = instructions.at(i);
+        vector<string> convertedInstruction;
+        convertedInstruction.push_back(instruction[0]);
+        convertedInstruction.push_back(instruction[1]);
+        convertedInstruction.push_back(instruction[2]);
 
         //Check if the current instruction is a literal definition
         if(instruction.at(1) == "*") {
-            printInstruction(instruction);
-            printSpaces(35 - instruction.at(2).length());
-            cout << symbolTable.getLiteralInfo(instruction.at(2))[0] << endl;
+            convertedInstruction.emplace_back("");
+            convertedInstruction.push_back(convertNumberToHex(symbolTable.getLiteralInfo(instruction.at(2))[0], 0));
+            convertedInstructions.push_back(convertedInstruction);
             continue;
         }
 
-        //Print object code of instruction
+        //Calculate object code of instruction, or process relevant assembler directives
         if(assemblerDirectives.find(instruction.at(2).substr(1)) == assemblerDirectives.end()) {
             //Current instruction is not an assembler directive, convert instruction to object code and print
             instruction[0] = instructions.at(i + 1)[0];
@@ -551,12 +558,14 @@ int main(int argc, char** argv) {
             if(instruction.at(2)[0] == '+') format++;
 
             instruction[0] = instructions.at(i)[0];
-            printInstruction(instruction);
-            printSpaces(9 - instruction.at(2).length());
-            cout << instruction.at(3);
 
-            printSpaces(26 - instruction.at(3).length());
-            cout << uppercase << hex << setw(2 * format) << setfill('0') << objectCode << endl;
+            convertedInstruction.push_back(instruction.at(3));
+
+            //Convert object code to hex with appropriate length and modifiers and add it to the converted instruction
+            stringstream convertToHex;
+            convertToHex << uppercase << hex << setw(format * 2) << setfill('0') << objectCode;
+            string objectCodeInHex = convertNumberToHex(objectCode, format * 2);
+            convertedInstruction.push_back(convertToHex.str());
         } else {
             //Check for assembler directives, certain directives must be processed in pass two
             if(instruction.at(2) == " BASE") {
@@ -566,13 +575,41 @@ int main(int argc, char** argv) {
             if(instruction.at(2) == " NOBASE") {
                 data.baseRegister = -1;
             }
-            //TODO: Print converted values of BYTE and WORD instructions
-            printInstruction(instruction);
-            printSpaces(9 - instruction.at(2).length());
-            cout << instruction.at(3);
+            convertedInstruction.push_back(instruction.at(3));
 
-            cout << endl;
+            //WORD and BYTE instructions should have their calculated values associated with them
+            //TODO: Error checking for values assigned being too large (over one byte/3 bytes)
+            if(instruction.at(2) == " BYTE") {
+                unsigned int value = convertOperandToTargetAddress(instruction.at(3), &data);
+                convertedInstruction.push_back(convertNumberToHex(value, 2));
+            } else if(instruction.at(2) == " WORD") {
+                unsigned int value = convertOperandToTargetAddress(instruction.at(3), &data);
+                convertedInstruction.push_back(convertNumberToHex(value, 6));
+            } else {
+                convertedInstruction.emplace_back("");
+            }
         }
+
+        convertedInstructions.push_back(convertedInstruction);
+    }
+
+    //Print out all converted instructions
+    //No further processing of instructions done at this stage, only output
+    for(auto instruction : convertedInstructions) {
+        //Skip printing address on END instruction
+        if(instruction[2] == " END") {
+            cout << "        ";
+        } else {
+            cout << uppercase << hex << setw(4) << setfill('0') << stoi(instruction.at(0)) << "    ";
+        }
+        cout << instruction.at(1);
+        printSpaces(8 - instruction.at(1).length());
+        cout << instruction.at(2);
+        printSpaces(9 - instruction.at(2).length());
+        cout << instruction.at(3);
+
+        printSpaces(26 - instruction.at(3).length());
+        cout << instruction.at(4) << endl;
     }
 
     cout << endl << endl;
