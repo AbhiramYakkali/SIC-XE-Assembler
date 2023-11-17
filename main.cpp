@@ -218,7 +218,6 @@ void processAssemblerDirective(vector<string>* lineParts, Data* data, vector<vec
     }
     if(instruction == "END") {
         //End of program, call command to pool literals at the current address
-        data->symbolTable->setLengthOfProgram(data->currentAddress + 3);
         data->currentAddress = data->symbolTable->setLiteralsAtAddress(data->currentAddress, instructions);
     }
     if(instruction == "RESW") {
@@ -418,6 +417,7 @@ unsigned int convertInstructionToObjectCode(vector<string>* instruction, Data* d
         //Address does not fit in a format 3 instruction, convert to format 4
         format = 4;
         instruction->at(2)[0] = '+';
+        data->additionalAddressCounter++;
     }
     if(format == 4) {
         //Format 4: opcode (6) + n i x b p e + address (20)
@@ -471,6 +471,7 @@ int main(int argc, char** argv) {
     //Initialize data object for ease of passing information to functions
     Data data;
     data.currentAddress = 0;
+    data.additionalAddressCounter = 0;
     data.baseRegister = -1;
     data.symbolTable = &symbolTable;
 
@@ -535,7 +536,10 @@ int main(int argc, char** argv) {
     for(int i = 0; i < instructions.size(); i++) {
         vector<string> instruction = instructions.at(i);
         vector<string> convertedInstruction;
-        convertedInstruction.push_back(instruction[0]);
+        unsigned int address = stoi(instruction[0], nullptr, 16);
+        address += data.additionalAddressCounter;
+        string newAddress = convertNumberToHex(address, 8);
+        convertedInstruction.push_back(newAddress);
         convertedInstruction.push_back(instruction[1]);
         convertedInstruction.push_back(instruction[2]);
 
@@ -552,6 +556,8 @@ int main(int argc, char** argv) {
             //Current instruction is not an assembler directive, convert instruction to object code and print
             instruction[0] = instructions.at(i + 1)[0];
             unsigned int objectCode = convertInstructionToObjectCode(&instruction, &data, &opTable);
+            //Update instruction in convertedInstruction in case format was switched to 4
+            convertedInstruction[2] = instruction[2];
 
             //Number of characters displayed in object code depends on format
             int format = opTable.at(instruction.at(2).substr(1)).second;
@@ -574,6 +580,9 @@ int main(int argc, char** argv) {
             }
             if(instruction.at(2) == " NOBASE") {
                 data.baseRegister = -1;
+            }
+            if(instruction.at(2) == " END") {
+                data.symbolTable->setLengthOfProgram(data.currentAddress + data.additionalAddressCounter);
             }
             convertedInstruction.push_back(instruction.at(3));
 
