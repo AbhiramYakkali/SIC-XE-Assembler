@@ -22,6 +22,7 @@ public:
 
     void addSymbol(const string& symbolName, int address, bool relative);
     pair<int, bool> getSymbolInfo(const string& symbolName);
+    void incrementSymbolAddresses(unsigned int address);
 
     void addLiteral(string literal);
     vector<unsigned int> getLiteralInfo(string literalName);

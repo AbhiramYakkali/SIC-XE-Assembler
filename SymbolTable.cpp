@@ -67,6 +67,21 @@ pair<int, bool> SymbolTable::getSymbolInfo(const std::string& symbolName) {
         return symbolInfo->at(index);
     }
 }
+//Increments the addresses of every symbol and literal in the symbol table past 'address'
+//Used when a format 3 instruction is converted to format 4 in pass two of the assembler
+void SymbolTable::incrementSymbolAddresses(unsigned int address) {
+    for(auto & symbol : *symbolInfo) {
+        if(symbol.first + 1 >= address) {
+            symbol.first += 1;
+        }
+    }
+
+    for(auto& literal : *literalInfo) {
+        if(literal.at(1) + 1 >= address) {
+            literal.at(1)++;
+        }
+    }
+}
 
 //Used to isolate the content of the literal (value between apostrophes)
 string isolateLiteralContent(const string& literal) {

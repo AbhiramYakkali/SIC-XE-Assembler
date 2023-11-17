@@ -418,6 +418,7 @@ unsigned int convertInstructionToObjectCode(vector<string>* instruction, Data* d
         format = 4;
         instruction->at(2)[0] = '+';
         data->additionalAddressCounter++;
+        data->symbolTable->incrementSymbolAddresses(stoi(instruction->at(0)));
     }
     if(format == 4) {
         //Format 4: opcode (6) + n i x b p e + address (20)
