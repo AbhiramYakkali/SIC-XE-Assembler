@@ -20,6 +20,13 @@ void printSpaces(int number) {
     }
 }
 
+//Helper function to convert a number to a string in hex format
+string convertNumberToHex(unsigned int number, int requiredLength) {
+    stringstream stream;
+    stream << uppercase << hex << setw(requiredLength) << setfill('0') << number;
+    return stream.str();
+}
+
 //Removes spaces at the end of a string
 string removeSpaces(const string& str) {
     size_t lastNonSpaceCharacter = str.find_last_not_of(' ');
@@ -130,6 +137,7 @@ unsigned int convertOperandToTargetAddress(const string& operand, Data* data) {
     //Check if operand is a number
     if(isStringANumber(shortenedOperand)) return stoi(shortenedOperand);
 
+    if(shortenedOperand == "*") return data->currentAddress;
     if(firstChar == '=') {
         //Operand is a literal, get address from symbol table
         return data->symbolTable->getLiteralInfo(shortenedOperand).at(1);
@@ -140,7 +148,7 @@ unsigned int convertOperandToTargetAddress(const string& operand, Data* data) {
         int index = shortenedOperand.find(op);
         if(index != string::npos) {
             //The string contains the operation being checked
-            string operand1 = shortenedOperand.substr(0, index);
+            string operand1 = shortenedOperand.substr(1, index - 1);
             string operand2 = shortenedOperand.substr(index + 1);
 
             //Convert string operands into numbers
@@ -165,17 +173,31 @@ unsigned int convertOperandToTargetAddress(const string& operand, Data* data) {
             }
 
             //Perform specified operations, carry out necessary checks (based on number of relative terms)
-            //TODO: Perform error checking based on number of relative terms
             if(op == '+') {
+                if(numOfRelative == 2) {
+                    //Adding two relative symbols is considered an error
+                    cout << "Error: attempted to add two relative symbols: " << operand1 << ", " << operand2 << endl;
+                    exit(BAD_EXIT);
+                }
                 return convertedOperand1 + convertedOperand2;
             }
             if(op == '-') {
                 return convertedOperand1 - convertedOperand2;
             }
             if(op == '*') {
+                if(numOfRelative == 1) {
+                    //Multiplying a relative symbol by an absolute is considered an error
+                    cout << "Error: attempted to multiply a relative symbol by an absolute: "
+                            << operand1 << ", " << operand2 << endl;
+                }
                 return convertedOperand1 - convertedOperand2;
             }
             if(op == '/') {
+                if(numOfRelative == 1) {
+                    //Dividing a relative symbol by an absolute is considered an error
+                    cout << "Error: attempted to perform division between relative and absolute symbols: " <<
+                            operand1 << ", " << operand2 << endl;
+                }
                 return convertedOperand1 / convertedOperand2;
             }
         }
@@ -186,7 +208,6 @@ unsigned int convertOperandToTargetAddress(const string& operand, Data* data) {
         //Use SymbolTable function to find its value
         return SymbolTable::getValue(shortenedOperand);
     }
-    if(shortenedOperand == "*") return data->currentAddress;
     if(firstChar == '#') {
         //Immediate addressing
         //Check if symbol table contains the operand, if it doesn't, assume the operand is a number
@@ -202,6 +223,10 @@ unsigned int convertOperandToTargetAddress(const string& operand, Data* data) {
         //Simple/Indirect addressing, get symbol address from symbol table and return
         return data->symbolTable->getSymbolInfo(shortenedOperand.substr(1)).first;
     }
+
+    //Error: given operand does not match any of the recognized patterns
+    cout << "Error: could not parse the given operand: " << operand << endl;
+    exit(BAD_EXIT);
 }
 
 //Process assembler directives, updating address counter and symbol table as necessary
@@ -249,8 +274,15 @@ void processAssemblerDirective(vector<string>* lineParts, Data* data, vector<vec
         //LTORG instruction, pool all unpooled literals at the current address
         symbolTable->setLiteralsAtAddress(data->currentAddress, instructions, &data->currentAddress);
     }
-
-    //TODO: Handle all other assembler directives
+    if(instruction == "EQU") {
+        //EQU instruction, symbol value is the calculated operand
+        symbolTable->addSymbol(label, address, false);
+        string operandInHex = convertNumberToHex(targetAddress, 0);
+        data->currentAddress += (operandInHex.length() + 1) / 2;
+    }
+    if(instruction == "ORG") {
+        //TODO: Implement ORG directive
+    }
 }
 
 //Helper function to add bits to the end of an integer
@@ -340,13 +372,6 @@ pair<bool, unsigned int> testDirectAddressing(unsigned int targetAddress, unsign
     }
 }
 
-//Helper function to convert a number to a string in hex format
-string convertNumberToHex(unsigned int number, int requiredLength) {
-    stringstream stream;
-    stream << uppercase << hex << setw(requiredLength) << setfill('0') << number;
-    return stream.str();
-}
-
 //Recalculates object codes for all prior instructions that refer to a symbol
 //Used when a format 3 instruction is converted to format 4 in pass two
 void recalculateInstructionObjectCodes(unsigned int addressOfLastInstruction, Data* data) {
@@ -388,6 +413,12 @@ unsigned int convertInstructionToObjectCode(vector<string>* instruction, Data* d
     unordered_map<string, pair<int, int>>* opTable = data->opTable;
     vector<pair<unsigned int, bool>>* targetAddresses = data->targetAddresses;
 
+    //Check if the instruction exists in the optable (checking if it is a valid instruction)
+    if(opTable->count(instruction->at(2).substr(1)) == 0) {
+        cout << "Error: instruction not found in op table: " << instruction->at(2).substr(1) << endl;
+        exit(BAD_EXIT);
+    }
+
     pair<int, int> instructionInfo = opTable->at(instruction->at(2).substr(1));
     int format = instructionInfo.second;
     unsigned int objectCode;
@@ -396,6 +427,7 @@ unsigned int convertInstructionToObjectCode(vector<string>* instruction, Data* d
 
     //Don't calculate target address for format 3/4 instructions
     if(format == 3 || format == 4)  {
+        //RSUB is an exception, it is a format 3 instruction but doesn't take an operand
         if(instruction->at(2) == " RSUB") {
             targetAddresses->emplace_back(0, false);
             return 0x4F0000;
@@ -501,6 +533,7 @@ unsigned int convertInstructionToObjectCode(vector<string>* instruction, Data* d
         objectCode = addNumber(objectCode, targetAddress, 20);
         return objectCode;
     }
+    return 0;
 }
 
 int main(int argc, char** argv) {
@@ -646,13 +679,25 @@ int main(int argc, char** argv) {
             convertedInstruction.push_back(instruction.at(3));
 
             //WORD and BYTE instructions should have their calculated values associated with them
-            //TODO: Error checking for values assigned being too large (over one byte/3 bytes)
             if(instruction.at(2) == " BYTE") {
                 unsigned int value = convertOperandToTargetAddress(instruction.at(3), &data);
                 convertedInstruction.push_back(convertNumberToHex(value, 2));
+
+                //Test if given operand is larger than one byte
+                string test = convertNumberToHex(value, 0);
+                if(test.length() > 2) {
+                    cout << "Error: BYTE assembler directive received operand of size greater than one byte: " << instruction.at(3) << endl;
+                    exit(BAD_EXIT);
+                }
             } else if(instruction.at(2) == " WORD") {
                 unsigned int value = convertOperandToTargetAddress(instruction.at(3), &data);
                 convertedInstruction.push_back(convertNumberToHex(value, 6));
+
+                //Test is given operand is larger than three bytes
+                string test = convertNumberToHex(value, 0);
+                if(test.length() > 6) {
+                    cout << "Error: WORD assembler directive received operand of size greater than one word: " << instruction.at(3) << endl;
+                }
             } else {
                 convertedInstruction.emplace_back("");
             }
