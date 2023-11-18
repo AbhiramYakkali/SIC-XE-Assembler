@@ -405,12 +405,8 @@ void recalculateInstructionObjectCodes(unsigned int addressOfLastInstruction, Da
         if(targetAddress.second) {
             string instructionAddress = instruction->at(0);
 
-            //Set address of the current instruction to the address of the next instruction temporarily
-            if(i == instructions->size() - 1) {
-                instruction->at(0) = to_string(addressOfLastInstruction);
-            } else {
-                instruction->at(0) = instructions->at(i + 1).at(0);
-            }
+            //Convert address of instruction to decimal because 'convertInstructionToObjectCode' takes decimal addresses
+            instruction->at(0) = to_string(stoi(instruction->at(0), nullptr, 16));
 
             unsigned int newObjectCode = convertInstructionToObjectCode(instruction, data);
             instruction->at(4) = convertNumberToHex(newObjectCode, instruction->at(4).length());
