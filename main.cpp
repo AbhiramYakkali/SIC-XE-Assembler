@@ -10,6 +10,7 @@
 
 #define NORMAL_EXIT 0
 #define BAD_EXIT 1
+#define INTERNAL_ERROR 2
 
 unsigned int convertInstructionToObjectCode(vector<string>* instruction, Data* data);
 
@@ -127,20 +128,74 @@ bool isStringANumber(const string& str) {
     return iss.eof() && !iss.fail();
 }
 
+//Returns a pair: <evaluated value of expression, if the result is relative>
+pair<unsigned int, bool> evaluateExpression(const string& operand1, const string& operand2, char operation, Data* data) {
+    int numOfRelative = 0;
+    unsigned int convertedOperand1, convertedOperand2;
+
+    if(isStringANumber(operand1)) {
+        convertedOperand1 = stoi(operand1);
+    } else {
+        pair<unsigned int, bool> operandInfo = data->symbolTable->getSymbolInfo(operand1);
+        convertedOperand1 = operandInfo.first;
+        if(operandInfo.second) numOfRelative++;
+    }
+    if(isStringANumber(operand2)) {
+        convertedOperand2 = stoi(operand2);
+    } else {
+        pair<unsigned int, bool> operandInfo = data->symbolTable->getSymbolInfo(operand2);
+        convertedOperand2 = operandInfo.first;
+        if(operandInfo.second) numOfRelative++;
+    }
+
+    //Perform specified operations, carry out necessary checks (based on number of relative terms)
+    if(operation == '+') {
+        if(numOfRelative == 2) {
+            //Adding two relative symbols is considered an error
+            cout << "Error: attempted to add two relative symbols: " << operand1 << ", " << operand2 << endl;
+            exit(BAD_EXIT);
+        }
+        return make_pair(convertedOperand1 + convertedOperand2, numOfRelative == 1);
+    }
+    if(operation == '-') {
+        return make_pair(convertedOperand1 - convertedOperand2, numOfRelative == 1);
+    }
+    if(operation == '*') {
+        if(numOfRelative == 1) {
+            //Multiplying a relative symbol by an absolute is considered an error
+            cout << "Error: attempted to multiply a relative symbol by an absolute: "
+                 << operand1 << ", " << operand2 << endl;
+        }
+        return make_pair(convertedOperand1 * convertedOperand2, numOfRelative == 1);
+    }
+    if(operation == '/') {
+        if(numOfRelative == 1) {
+            //Dividing a relative symbol by an absolute is considered an error
+            cout << "Error: attempted to perform division between relative and absolute symbols: " <<
+                 operand1 << ", " << operand2 << endl;
+        }
+        return make_pair(convertedOperand1 / convertedOperand2, numOfRelative == 1);
+    }
+
+    cout << "Internal error: received invalid operation: " << operation << endl;
+    exit(INTERNAL_ERROR);
+}
+
 //Takes an operand (immediate operand, label, etc.) and converts it to target address
-unsigned int convertOperandToTargetAddress(const string& operand, Data* data) {
+//Returns a pair: <target address, if the result is relative> (sometimes result is not relative, ex: if it is a number)
+pair<unsigned int, bool> convertOperandToTargetAddress(const string& operand, Data* data) {
     //In case of ',X' being present in operand, ignore it
     string shortenedOperand = operand.substr(0, operand.find(','));
     //Isolate first character because it usually indicates what type of operand this is
     char firstChar = shortenedOperand[0];
 
     //Check if operand is a number
-    if(isStringANumber(shortenedOperand)) return stoi(shortenedOperand);
+    if(isStringANumber(shortenedOperand)) return make_pair(stoi(shortenedOperand), false);
 
-    if(shortenedOperand == "*") return data->currentAddress;
+    if(shortenedOperand == "*") return make_pair(data->currentAddress, true);
     if(firstChar == '=') {
         //Operand is a literal, get address from symbol table
-        return data->symbolTable->getLiteralInfo(shortenedOperand).at(1);
+        return make_pair(data->symbolTable->getLiteralInfo(shortenedOperand).at(1), true);
     }
     //Check if operand is an expression
     string operations = "+-*/";
@@ -151,62 +206,14 @@ unsigned int convertOperandToTargetAddress(const string& operand, Data* data) {
             string operand1 = shortenedOperand.substr(1, index - 1);
             string operand2 = shortenedOperand.substr(index + 1);
 
-            //Convert string operands into numbers
-            //If the operand is a number, treat it as a number; otherwise, treat it as a symbol
-            unsigned int convertedOperand1, convertedOperand2;
-            //Keep track of the number of relative terms (certain operations can't be performed with certain number of relative terms)
-            int numOfRelative = 0;
-
-            if(isStringANumber(operand1)) {
-                convertedOperand1 = stoi(operand1);
-            } else {
-                pair<unsigned int, bool> operandInfo = data->symbolTable->getSymbolInfo(operand1);
-                convertedOperand1 = operandInfo.first;
-                if(operandInfo.second) numOfRelative++;
-            }
-            if(isStringANumber(operand2)) {
-                convertedOperand2 = stoi(operand2);
-            } else {
-                pair<unsigned int, bool> operandInfo = data->symbolTable->getSymbolInfo(operand2);
-                convertedOperand2 = operandInfo.first;
-                if(operandInfo.second) numOfRelative++;
-            }
-
-            //Perform specified operations, carry out necessary checks (based on number of relative terms)
-            if(op == '+') {
-                if(numOfRelative == 2) {
-                    //Adding two relative symbols is considered an error
-                    cout << "Error: attempted to add two relative symbols: " << operand1 << ", " << operand2 << endl;
-                    exit(BAD_EXIT);
-                }
-                return convertedOperand1 + convertedOperand2;
-            }
-            if(op == '-') {
-                return convertedOperand1 - convertedOperand2;
-            }
-            if(op == '*') {
-                if(numOfRelative == 1) {
-                    //Multiplying a relative symbol by an absolute is considered an error
-                    cout << "Error: attempted to multiply a relative symbol by an absolute: "
-                            << operand1 << ", " << operand2 << endl;
-                }
-                return convertedOperand1 - convertedOperand2;
-            }
-            if(op == '/') {
-                if(numOfRelative == 1) {
-                    //Dividing a relative symbol by an absolute is considered an error
-                    cout << "Error: attempted to perform division between relative and absolute symbols: " <<
-                            operand1 << ", " << operand2 << endl;
-                }
-                return convertedOperand1 / convertedOperand2;
-            }
+            return evaluateExpression(operand1, operand2, op, data);
         }
     }
 
     if((shortenedOperand[1] == 'C' || shortenedOperand[1] == 'X') && shortenedOperand[2] == '\'') {
         //This is an operand of format X'F1' or C'EOF'
         //Use SymbolTable function to find its value
-        return SymbolTable::getValue(shortenedOperand);
+        return make_pair(SymbolTable::getValue(shortenedOperand), false);
     }
     if(firstChar == '#') {
         //Immediate addressing
@@ -214,14 +221,14 @@ unsigned int convertOperandToTargetAddress(const string& operand, Data* data) {
         pair<int, bool> symbolInfo = data->symbolTable->getSymbolInfo(shortenedOperand.substr(1));
 
         if(symbolInfo.first == -1) {
-            return stoi(shortenedOperand.substr(1));
+            return make_pair(stoi(shortenedOperand.substr(1)), false);
         } else {
-            return symbolInfo.first;
+            return make_pair(symbolInfo.first, true);
         }
     }
     if(firstChar == ' ' || firstChar == '@') {
         //Simple/Indirect addressing, get symbol address from symbol table and return
-        return data->symbolTable->getSymbolInfo(shortenedOperand.substr(1)).first;
+        return make_pair(data->symbolTable->getSymbolInfo(shortenedOperand.substr(1)).first, true);
     }
 
     //Error: given operand does not match any of the recognized patterns
@@ -235,7 +242,12 @@ void processAssemblerDirective(vector<string>* lineParts, Data* data, vector<vec
     string instruction = lineParts->at(1).substr(1);
     string operand = lineParts->at(2);
     int targetAddress;
-    if(!operand.empty()) targetAddress = convertOperandToTargetAddress(operand, data);
+    bool targetAddressRelative;
+    if(!operand.empty()) {
+        pair<unsigned int, bool> convertedOperand = convertOperandToTargetAddress(operand, data);
+        targetAddress = convertedOperand.first;
+        targetAddressRelative = convertedOperand.second;
+    }
 
     int address = data->currentAddress;
     SymbolTable* symbolTable = data->symbolTable;
@@ -276,7 +288,7 @@ void processAssemblerDirective(vector<string>* lineParts, Data* data, vector<vec
     }
     if(instruction == "EQU") {
         //EQU instruction, symbol value is the calculated operand
-        symbolTable->addSymbol(label, address, false);
+        symbolTable->addSymbol(label, address, targetAddressRelative);
         string operandInHex = convertNumberToHex(targetAddress, 0);
         data->currentAddress += (operandInHex.length() + 1) / 2;
     }
@@ -384,7 +396,7 @@ void recalculateInstructionObjectCodes(unsigned int addressOfLastInstruction, Da
 
         //BASE and NOBASE instructions should be processed here to make sure base register is kept up to date
         if(instruction->at(2) == " BASE") {
-            data->baseRegister = convertOperandToTargetAddress(instruction->at(3), data);
+            data->baseRegister = convertOperandToTargetAddress(instruction->at(3), data).first;
         }
         if(instruction->at(2) == " NOBASE") {
             data->baseRegister = -1;
@@ -432,7 +444,7 @@ unsigned int convertInstructionToObjectCode(vector<string>* instruction, Data* d
             targetAddresses->emplace_back(0, false);
             return 0x4F0000;
         }
-        else targetAddress = convertOperandToTargetAddress(instruction->at(3), data);
+        else targetAddress = convertOperandToTargetAddress(instruction->at(3), data).first;
     }
 
     //Maps each register to an int array corresponding to its number (used in format 2)
@@ -510,7 +522,7 @@ unsigned int convertInstructionToObjectCode(vector<string>* instruction, Data* d
         //Will be added back in format 4 handling
         targetAddresses->pop_back();
         recalculateInstructionObjectCodes(address, data);
-        targetAddress = convertOperandToTargetAddress(instruction->at(3), data);
+        targetAddress = convertOperandToTargetAddress(instruction->at(3), data).first;
     }
     if(format == 4) {
         //Format 4: opcode (6) + n i x b p e + address (20)
@@ -668,7 +680,7 @@ int main(int argc, char** argv) {
         } else {
             //Check for assembler directives, certain directives must be processed in pass two
             if(instruction.at(2) == " BASE") {
-                unsigned int value = convertOperandToTargetAddress(instruction.at(3), &data);
+                unsigned int value = convertOperandToTargetAddress(instruction.at(3), &data).first;
                 data.baseRegister = value;
             }
             if(instruction.at(2) == " NOBASE") {
@@ -681,7 +693,7 @@ int main(int argc, char** argv) {
 
             //WORD and BYTE instructions should have their calculated values associated with them
             if(instruction.at(2) == " BYTE") {
-                unsigned int value = convertOperandToTargetAddress(instruction.at(3), &data);
+                unsigned int value = convertOperandToTargetAddress(instruction.at(3), &data).first;
                 convertedInstruction.push_back(convertNumberToHex(value, 2));
 
                 //Test if given operand is larger than one byte
@@ -691,7 +703,7 @@ int main(int argc, char** argv) {
                     exit(BAD_EXIT);
                 }
             } else if(instruction.at(2) == " WORD") {
-                unsigned int value = convertOperandToTargetAddress(instruction.at(3), &data);
+                unsigned int value = convertOperandToTargetAddress(instruction.at(3), &data).first;
                 convertedInstruction.push_back(convertNumberToHex(value, 6));
 
                 //Test is given operand is larger than three bytes

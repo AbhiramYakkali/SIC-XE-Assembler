@@ -17,4 +17,5 @@ COUNT     RESW    1
 TABLE     RESW    2000
 TABLE2    RESW    2000
 TOTAL     RESW    1
+TEST      EQU     COUNT-15
           END     FIRST
