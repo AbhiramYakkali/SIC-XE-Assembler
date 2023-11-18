@@ -11,7 +11,8 @@ LOOP      ADD     TABLE,X
          +STA     TOTAL
           RSUB
 MYLIT     LDA    =C'EOF'
-TEST      EQU     FIRST+LOOP
+          LDA    #10000
+         +LDX    #10000
 COUNT     RESW    1
 TABLE     RESW    2000
 TABLE2    RESW    2000

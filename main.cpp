@@ -628,9 +628,10 @@ int main(int argc, char** argv) {
     for(auto & i : instructions) {
         vector<string> instruction = i;
         vector<string> convertedInstruction;
-        unsigned int address = stoi(instruction[0], nullptr, 16);
-        address += data.additionalAddressCounter;
-        string newAddress = convertNumberToHex(address, 8);
+
+        //Add first three values to convertedInstruction vector: address, label, instruction (already known)
+        unsigned int address = stoi(instruction[0]) + data.additionalAddressCounter;
+        string newAddress = convertNumberToHex(address, 4);
         convertedInstruction.push_back(newAddress);
         convertedInstruction.push_back(instruction[1]);
         convertedInstruction.push_back(instruction[2]);
@@ -715,7 +716,7 @@ int main(int argc, char** argv) {
         if(instruction[2] == " END") {
             cout << "        ";
         } else {
-            cout << uppercase << hex << setw(4) << setfill('0') << stoi(instruction.at(0)) << "    ";
+            cout << instruction.at(0) << "    ";
         }
         cout << instruction.at(1);
         printSpaces(8 - instruction.at(1).length());
