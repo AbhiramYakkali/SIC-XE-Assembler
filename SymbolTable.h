@@ -31,6 +31,5 @@ public:
     void setCSECT(string name, unsigned int address);
     void setLengthOfProgram(unsigned int length);
 
-    void printSymbols();
-    void printLabels();
+    void printSymbols(string filename);
 };

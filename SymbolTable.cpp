@@ -4,6 +4,7 @@
 #include <iomanip>
 #include <utility>
 #include <sstream>
+#include <fstream>
 
 SymbolTable::SymbolTable() {
     labels = new vector<string>(0);
@@ -31,9 +32,9 @@ void SymbolTable::setLengthOfProgram(unsigned int length) {
 }
 
 //Helper function to print a specified number of spaces
-void addSpaces(int number) {
+void addSpaces(int number, ofstream* file) {
     for(int i = 0; i < number; i++) {
-        cout << " ";
+        *file << " ";
     }
 }
 
@@ -176,49 +177,45 @@ unsigned int SymbolTable::setLiteralsAtAddress(unsigned int address, vector<vect
     return currentAddress;
 }
 
-void SymbolTable::printSymbols() {
+void SymbolTable::printSymbols(string filename) {
+    //Open file
+    ofstream symbolTableFile;
+    symbolTableFile.open(filename);
+
     //Print symbols
-    cout << "CSect   Symbol  Value   LENGTH  Flags:\n--------------------------------------" << endl;
-    cout << CSectName;
-    addSpaces(16 - CSectName.length());
-    cout << uppercase << hex << setw(6) << setfill('0') << startingAddress << "  " << programLength << endl;
+    symbolTableFile << "CSect   Symbol  Value   LENGTH  Flags:\n--------------------------------------" << endl;
+    symbolTableFile << CSectName;
+    addSpaces(16 - CSectName.length(), &symbolTableFile);
+    symbolTableFile << uppercase << hex << setw(6) << setfill('0') << startingAddress << "  " << programLength << endl;
 
     for(int i = 0; i < labels->size(); i++) {
-        addSpaces(8);
-        cout << labels->at(i);
+        addSpaces(8, &symbolTableFile);
+        symbolTableFile << labels->at(i);
 
         //Print spaces to format output correctly
-        addSpaces(8 - labels->at(i).length());
+        addSpaces(8 - labels->at(i).length(), &symbolTableFile);
 
-        cout << uppercase << hex << setw(6) << setfill('0') << symbolInfo->at(i).first;
-        addSpaces(10);
+        symbolTableFile << uppercase << hex << setw(6) << setfill('0') << symbolInfo->at(i).first;
+        addSpaces(10, &symbolTableFile);
 
-        if(symbolInfo->at(i).second) cout << "R" << endl;
-        else cout << "A" << endl;
+        if(symbolInfo->at(i).second) symbolTableFile << "R" << endl;
+        else symbolTableFile << "A" << endl;
     }
 
     //Print literals
-    cout << endl << "Literal Table\nName  Operand   Address  Length:\n--------------------------------" << endl;
+    symbolTableFile << endl << "Literal Table\nName  Operand   Address  Length:\n--------------------------------" << endl;
     for(int i = 0; i < literals->size(); i++) {
         string literal = isolateLiteralContent(literals->at(i));
         vector<unsigned int> info = literalInfo->at(i);
 
-        cout << literal;
-        addSpaces(6 - literal.length());
-        cout << info[0];
-        addSpaces(11 - to_string(info[0]).length());
-        cout << info[1];
-        addSpaces(10 - to_string(info[1]).length());
-        cout << info[2] << endl;
+        symbolTableFile << literal;
+        addSpaces(6 - literal.length(), &symbolTableFile);
+        symbolTableFile << info[0];
+        addSpaces(11 - to_string(info[0]).length(), &symbolTableFile);
+        symbolTableFile << info[1];
+        addSpaces(10 - to_string(info[1]).length(), &symbolTableFile);
+        symbolTableFile << info[2] << endl;
     }
-}
 
-void SymbolTable::printLabels() {
-    bool found = false;
-    for(int i = 0; i < labels->size(); i++) {
-        cout << labels->at(i) << endl;
-        if(labels->at(i) == "TOTAL") found = true;
-    }
-    if(found) cout << "TOTAL found";
-    else cout << "TOTAL not found";
+    symbolTableFile.close();
 }

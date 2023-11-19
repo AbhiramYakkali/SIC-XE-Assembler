@@ -11,6 +11,6 @@ typedef struct {
     SymbolTable* symbolTable;
 
     vector<vector<string>>* convertedInstructions;
-    vector<pair<unsigned int, bool>>* targetAddresses;
+    vector<bool>* mustRecalculateObjectCode;
     unordered_map<string, pair<int, int>>* opTable;
 } Data;

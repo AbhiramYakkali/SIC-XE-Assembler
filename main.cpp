@@ -12,7 +12,7 @@
 #define BAD_EXIT 1
 #define INTERNAL_ERROR 2
 
-unsigned int convertInstructionToObjectCode(vector<string>* instruction, Data* data);
+unsigned int convertInstructionToObjectCode(vector<string>* instruction, Data* data, int index);
 
 //Helper function to print a specified number of spaces
 void printSpacesToFile(int number, ofstream* file) {
@@ -183,12 +183,11 @@ pair<unsigned int, bool> evaluateExpression(const string& operand1, const string
 
 //Takes an operand (immediate operand, label, etc.) and converts it to target address
 //Returns a pair: <target address, if the result is relative> (sometimes result is not relative, ex: if it is a number)
-pair<unsigned int, bool> convertOperandToTargetAddress(string operand, Data* data) {
+pair<unsigned int, bool> convertOperandToTargetAddress(const string& operand, Data* data) {
     //In case of ',X' being present in operand, ignore it
     string shortenedOperand = operand.substr(0, operand.find(','));
     //Isolate first character because it usually indicates what type of operand this is
     char firstChar = shortenedOperand[0];
-    //cout << data->symbolTable->getSymbolInfo("TOTAL").first << endl;
 
     //Check if operand is a number
     if(isStringANumber(shortenedOperand)) return make_pair(stoi(shortenedOperand), false);
@@ -229,9 +228,6 @@ pair<unsigned int, bool> convertOperandToTargetAddress(string operand, Data* dat
     }
     if(firstChar == ' ' || firstChar == '@') {
         //Simple/Indirect addressing, get symbol address from symbol table and return
-        //cout << shortenedOperand << endl << shortenedOperand.substr(1).length() << endl;
-        //cout << data->symbolTable->getSymbolInfo(" TOTAL").first << endl;
-        //cout << hex << uppercase << data->symbolTable->getSymbolInfo(shortenedOperand.substr(1)).first << endl;
         return make_pair(data->symbolTable->getSymbolInfo(shortenedOperand.substr(1)).first, true);
     }
 
@@ -295,9 +291,6 @@ void processAssemblerDirective(vector<string>* lineParts, Data* data, vector<vec
         symbolTable->addSymbol(label, address, targetAddressRelative);
         string operandInHex = convertNumberToHex(targetAddress, 0);
         data->currentAddress += (operandInHex.length() + 1) / 2;
-    }
-    if(instruction == "ORG") {
-        //TODO: Implement ORG directive
     }
 }
 
@@ -395,42 +388,52 @@ pair<bool, unsigned int> testDirectAddressing(unsigned int targetAddress, unsign
 //Used when a format 3 instruction is converted to format 4 in pass two
 void recalculateInstructionObjectCodes(unsigned int addressOfLastInstruction, Data* data) {
     vector<vector<string>>* instructions = data->convertedInstructions;
-    vector<pair<unsigned int, bool>>* targetAddresses = data->targetAddresses;
+    vector<bool>* targetAddresses = data->mustRecalculateObjectCode;
 
-    for(int i = 0; i < instructions->size(); i++) {
-        pair<unsigned int, bool> targetAddress = targetAddresses->at(i);
+    for(int i = 0; i < instructions->size() - 1; i++) {
         vector<string>* instruction = &instructions->at(i);
 
         //BASE and NOBASE instructions should be processed here to make sure base register is kept up to date
         if(instruction->at(2) == " BASE") {
             data->baseRegister = convertOperandToTargetAddress(instruction->at(3), data).first;
             data->baseRegisterValid = true;
+            continue;
         }
         if(instruction->at(2) == " NOBASE") {
             data->baseRegisterValid = false;
+            continue;
         }
 
-        if(targetAddress.second) {
+        if(targetAddresses->at(i)) {
             string instructionAddress = instruction->at(0);
 
             //Convert address of instruction to decimal because 'convertInstructionToObjectCode' takes decimal addresses
             instruction->at(0) = to_string(stoi(instruction->at(0), nullptr, 16));
 
-            unsigned int newObjectCode = convertInstructionToObjectCode(instruction, data);
+            unsigned int newObjectCode = convertInstructionToObjectCode(instruction, data, i);
             instruction->at(4) = convertNumberToHex(newObjectCode, instruction->at(4).length());
             instruction->at(0) = instructionAddress;
         }
     }
 }
 
+void updateTargetAddressVector(int index, bool relative, Data* data) {
+    if(index == -1) {
+        data->mustRecalculateObjectCode->push_back(relative);
+    } else {
+        data->mustRecalculateObjectCode->at(index) = relative;
+    }
+}
+
 //Processes given instruction and returns object code
 //Vector of size 4 stores instruction information: address, label, instruction, operand
-unsigned int convertInstructionToObjectCode(vector<string>* instruction, Data* data) {
+unsigned int convertInstructionToObjectCode(vector<string>* instruction, Data* data, int index) {
     unordered_map<string, pair<int, int>>* opTable = data->opTable;
-    vector<pair<unsigned int, bool>>* targetAddresses = data->targetAddresses;
+    vector<bool>* mustRecalculateObjectCode = data->mustRecalculateObjectCode;
 
     //Check if the instruction exists in the optable (checking if it is a valid instruction)
     if(opTable->count(instruction->at(2).substr(1)) == 0) {
+        cout << data->convertedInstructions->size() << endl;
         cout << "Error: instruction not found in op table: " << instruction->at(2).substr(1) << endl;
         exit(BAD_EXIT);
     }
@@ -445,29 +448,29 @@ unsigned int convertInstructionToObjectCode(vector<string>* instruction, Data* d
     if(format == 3 || format == 4)  {
         //RSUB is an exception, it is a format 3 instruction but doesn't take an operand
         if(instruction->at(2).find("RSUB") != string::npos) {
-            targetAddresses->emplace_back(0, false);
+            mustRecalculateObjectCode->push_back(false);
             //5177344 = 0x4F0000
             return 5177344;
         }
         else targetAddress = convertOperandToTargetAddress(instruction->at(3), data).first;
     }
 
-    //Maps each register to an int array corresponding to its number (used in format 2)
-    unordered_map<char, vector<int>> registerNumbers = initializeRegisterNumbers();
-
     //Check for '+' before instruction, switch to format 4 if found
     if(instruction->at(2)[0] == '+') format = 4;
 
     if(format == 1) {
         //Format 1: object code = opcode
-        targetAddresses->emplace_back(0, false);
+        mustRecalculateObjectCode->push_back(false);
         return instructionInfo.first;
     } else if(format == 2) {
         //Format 2: object code = opcode (8 bits) + r1 (4 bits) + r2 (4 bits)
+        //Maps each register to an int array corresponding to its number
+        unordered_map<char, vector<int>> registerNumbers = initializeRegisterNumbers();
+
         objectCode = instructionInfo.first;
         objectCode = addBits(objectCode, registerNumbers[instruction->at(3)[1]]);
         objectCode = addBits(objectCode, registerNumbers[instruction->at(3)[3]]);
-        targetAddresses->emplace_back(0, false);
+        mustRecalculateObjectCode->push_back(false);
         return objectCode;
     } else if(format == 3) {
         //Format 3: opcode (6) + n i x b p e + disp (12)
@@ -485,37 +488,53 @@ unsigned int convertInstructionToObjectCode(vector<string>* instruction, Data* d
         int address = stoi(instruction->at(0));
 
         if(instruction->at(3)[0] == '#') {
-            targetAddresses->emplace_back(0, false);
             //Using immediate addressing
             //Addressing mode order: direct, PC relative, base relative
 
             //Try direct addressing
             pair<bool, unsigned int> result = testDirectAddressing(targetAddress, objectCode);
-            if(result.first) return result.second;
+            if(result.first) {
+                updateTargetAddressVector(index, false, data);
+                return result.second;
+            }
 
             //Try PC relative addressing
             result = testPCRelativeAddressing(targetAddress, address, objectCode);
-            if(result.first) return result.second;
+            if(result.first) {
+                updateTargetAddressVector(index, true, data);
+                return result.second;
+            }
 
             //Try base relative addressing
             result = testBaseRelativeAddressing(targetAddress, data, objectCode);
-            if(result.first) return result.second;
+            if(result.first) {
+                updateTargetAddressVector(index, true, data);
+                return result.second;
+            }
         } else {
-            targetAddresses->emplace_back(targetAddress, true);
             //Simple/indirect addressing
             //Addressing mode order: PC relative, base relative, direct
 
             //Try PC relative addressing
             pair<bool, unsigned int> result = testPCRelativeAddressing(targetAddress, address, objectCode);
-            if(result.first) return result.second;
+            if(result.first) {
+                updateTargetAddressVector(index, true, data);
+                return result.second;
+            }
 
             //Try base relative addressing
             result = testBaseRelativeAddressing(targetAddress, data, objectCode);
-            if(result.first) return result.second;
+            if(result.first) {
+                updateTargetAddressVector(index, true, data);
+                return result.second;
+            }
 
             //Try direct addressing
             result = testDirectAddressing(targetAddress, objectCode);
-            if(result.first) return result.second;
+            if(result.first) {
+                updateTargetAddressVector(index, false, data);
+                return result.second;
+            }
         }
 
         //Address does not fit in a format 3 instruction, convert to format 4
@@ -523,15 +542,15 @@ unsigned int convertInstructionToObjectCode(vector<string>* instruction, Data* d
         instruction->at(2)[0] = '+';
         data->additionalAddressCounter++;
         data->symbolTable->incrementSymbolAddresses(address);
-        //Remove element corresponding to this instruction from targetAddresses queue
+        //Remove element corresponding to this instruction from mustRecalculateObjectCode queue
         //Will be added back in format 4 handling
-        targetAddresses->pop_back();
+        mustRecalculateObjectCode->pop_back();
         recalculateInstructionObjectCodes(address, data);
         targetAddress = convertOperandToTargetAddress(instruction->at(3), data).first;
     }
     if(format == 4) {
         //Format 4: opcode (6) + n i x b p e + address (20)
-        targetAddresses->emplace_back(targetAddress, true);
+        mustRecalculateObjectCode->push_back(true);
 
         objectCode = instructionInfo.first;
         objectCode >>= 2;
@@ -631,14 +650,13 @@ void assembleFile(const string& filename) {
     //Vector containing instructions after making any necessary changes in pass two
     //Vector contains: address, label, instruction, operand, object code
     vector<vector<string>> convertedInstructions;
-    //Contains pairs representing the target address of each instruction in convertedInstructions
-    //bool marks if the targetAddress refers to an actual address or if it's just a number
-    vector<pair<unsigned int, bool>> targetAddresses;
+    //Keeps track of which instructions must be recalculated when format 3 instruction converted to format 4
+    vector<bool> mustRecalculateObjectCode;
     data.convertedInstructions = &convertedInstructions;
-    data.targetAddresses = &targetAddresses;
+    data.mustRecalculateObjectCode = &mustRecalculateObjectCode;
 
     //Pass two of assembler
-    //Convert instructions to object code, print to output file
+    //Convert instructions to object code, process certain assembler directives
     for(auto & i : instructions) {
         vector<string> instruction = i;
         vector<string> convertedInstruction;
@@ -655,14 +673,14 @@ void assembleFile(const string& filename) {
             convertedInstruction.emplace_back("");
             convertedInstruction.push_back(convertNumberToHex(symbolTable.getLiteralInfo(instruction.at(2))[0], 0));
             convertedInstructions.push_back(convertedInstruction);
+            mustRecalculateObjectCode.push_back(false);
             continue;
         }
 
         //Calculate object code of instruction, or process relevant assembler directives
         if(assemblerDirectives.find(instruction.at(2).substr(1)) == assemblerDirectives.end()) {
             //Current instruction is not an assembler directive, convert instruction to object code and print
-            //instruction[0] = instructions.at(i + 1)[0];
-            unsigned int objectCode = convertInstructionToObjectCode(&instruction, &data);
+            unsigned int objectCode = convertInstructionToObjectCode(&instruction, &data, -1);
             //Update instruction in convertedInstruction in case format was switched to 4
             convertedInstruction[2] = instruction[2];
 
@@ -680,6 +698,8 @@ void assembleFile(const string& filename) {
             string objectCodeInHex = convertNumberToHex(objectCode, format * 2);
             convertedInstruction.push_back(convertToHex.str());
         } else {
+            mustRecalculateObjectCode.push_back(false);
+
             //Check for assembler directives, certain directives must be processed in pass two
             if(instruction.at(2) == " BASE") {
                 unsigned int value = convertOperandToTargetAddress(instruction.at(3), &data).first;
@@ -717,8 +737,6 @@ void assembleFile(const string& filename) {
             } else {
                 convertedInstruction.emplace_back("");
             }
-
-            targetAddresses.emplace_back(0, false);
         }
 
         convertedInstructions.push_back(convertedInstruction);
@@ -726,7 +744,7 @@ void assembleFile(const string& filename) {
 
     //Print out all converted instructions
     //No further processing of instructions done at this stage, only output
-    ofstream listingFile, symbolTableFile;
+    ofstream listingFile;
     string fileWithoutExtension = filename.substr(0, filename.find('.'));
 
     listingFile.open(fileWithoutExtension + ".l");
@@ -748,7 +766,9 @@ void assembleFile(const string& filename) {
         listingFile << instruction.at(4) << endl;
     }
 
-    symbolTable.printSymbols();
+    listingFile.close();
+
+    symbolTable.printSymbols(fileWithoutExtension + ".st");
 }
 
 int main(int argc, char** argv) {
