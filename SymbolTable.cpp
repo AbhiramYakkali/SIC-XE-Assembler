@@ -8,7 +8,7 @@
 SymbolTable::SymbolTable() {
     labels = new vector<string>(0);
     //Symbol info format: <address, relative>
-    symbolInfo = new vector<pair<int, bool>>(0);
+    symbolInfo = new vector<pair<unsigned int, bool>>(0);
 
     literals = new vector<string>(0);
     //Literal info format: <value, address, size>
@@ -22,11 +22,11 @@ SymbolTable::~SymbolTable() {
 }
 
 //Functions to set CSect name, starting address, and length (for printing)
-void SymbolTable::setCSECT(string name, int address) {
+void SymbolTable::setCSECT(string name, unsigned int address) {
     CSectName = std::move(name);
     startingAddress = address;
 }
-void SymbolTable::setLengthOfProgram(int length) {
+void SymbolTable::setLengthOfProgram(unsigned int length) {
     programLength = length;
 }
 
@@ -46,7 +46,7 @@ bool isStringNumber(const string& str) {
     return iss.eof() && !iss.fail();
 }
 
-void SymbolTable::addSymbol(const std::string& symbolName, int address, bool relative) {
+void SymbolTable::addSymbol(const std::string& symbolName, unsigned int address, bool relative) {
     labels->push_back(symbolName);
     symbolInfo->emplace_back(address, relative);
 }
@@ -70,14 +70,15 @@ pair<int, bool> SymbolTable::getSymbolInfo(const std::string& symbolName) {
 //Increments the addresses of every symbol and literal in the symbol table past 'address'
 //Used when a format 3 instruction is converted to format 4 in pass two of the assembler
 void SymbolTable::incrementSymbolAddresses(unsigned int address) {
-    for(auto & symbol : *symbolInfo) {
-        if(symbol.first + 1 >= address) {
-            symbol.first += 1;
+    for(int i = 1; i < symbolInfo->size(); i++) {
+        pair<unsigned int, bool>* symbol = &symbolInfo->at(i);
+        if(symbol->first > address) {
+            symbol->first += 1;
         }
     }
 
     for(auto& literal : *literalInfo) {
-        if(literal.at(1) + 1 >= address) {
+        if(literal.at(1) > address) {
             literal.at(1)++;
         }
     }
@@ -110,6 +111,9 @@ unsigned int SymbolTable::getValue(string operand) {
         //Operand is a hexadecimal number
         return static_cast<unsigned int>(stoi(content, nullptr, 16));
     }
+
+    cout << "Error: could not process value of operand: " << operand << endl;
+    exit(1);
 }
 
 void SymbolTable::addLiteral(string literal) {
@@ -153,7 +157,7 @@ vector<unsigned int> SymbolTable::getLiteralInfo(const string& literalName) {
 //Pools literals at the designated address
 //Returns the new address after all literals have been pooled
 //Alters the vector containing instructions to include the pooled literals
-unsigned int SymbolTable::setLiteralsAtAddress(unsigned int address, vector<vector<string>>* instructions, int* addressCounter) {
+unsigned int SymbolTable::setLiteralsAtAddress(unsigned int address, vector<vector<string>>* instructions, unsigned int* addressCounter) {
     //Literals being pooled at the defined address
     //Iterate through the current literal pool, find ones not bound to an address, and pool them here
     unsigned int currentAddress = address;
@@ -207,4 +211,14 @@ void SymbolTable::printSymbols() {
         addSpaces(10 - to_string(info[1]).length());
         cout << info[2] << endl;
     }
+}
+
+void SymbolTable::printLabels() {
+    bool found = false;
+    for(int i = 0; i < labels->size(); i++) {
+        cout << labels->at(i) << endl;
+        if(labels->at(i) == "TOTAL") found = true;
+    }
+    if(found) cout << "TOTAL found";
+    else cout << "TOTAL not found";
 }

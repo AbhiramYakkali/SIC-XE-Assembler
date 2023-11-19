@@ -1,8 +1,9 @@
 #include "SymbolTable.h"
 
 typedef struct {
-    int currentAddress;
-    int baseRegister;
+    unsigned int currentAddress;
+    unsigned int baseRegister;
+    bool baseRegisterValid;
     //Tracks how much should be added to the address of instructions
     //Incremented when a format 3 instruction is switched to format 4 in pass two
     int additionalAddressCounter;

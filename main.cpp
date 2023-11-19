@@ -15,9 +15,9 @@
 unsigned int convertInstructionToObjectCode(vector<string>* instruction, Data* data);
 
 //Helper function to print a specified number of spaces
-void printSpaces(int number) {
+void printSpacesToFile(int number, ofstream* file) {
     for(int i = 0; i < number; i++) {
-        cout << " ";
+        *file << " ";
     }
 }
 
@@ -30,10 +30,10 @@ string convertNumberToHex(unsigned int number, int requiredLength) {
 
 //Removes spaces at the end of a string
 string removeSpaces(const string& str) {
-    size_t lastNonSpaceCharacter = str.find_last_not_of(' ');
+    size_t lastNonSpaceCharacter = str.substr(1).find(' ');
     string output;
 
-    output = str.substr(0, lastNonSpaceCharacter + 1);
+    output = str[0] + str.substr(1, lastNonSpaceCharacter);
 
     return output;
 }
@@ -183,11 +183,12 @@ pair<unsigned int, bool> evaluateExpression(const string& operand1, const string
 
 //Takes an operand (immediate operand, label, etc.) and converts it to target address
 //Returns a pair: <target address, if the result is relative> (sometimes result is not relative, ex: if it is a number)
-pair<unsigned int, bool> convertOperandToTargetAddress(const string& operand, Data* data) {
+pair<unsigned int, bool> convertOperandToTargetAddress(string operand, Data* data) {
     //In case of ',X' being present in operand, ignore it
     string shortenedOperand = operand.substr(0, operand.find(','));
     //Isolate first character because it usually indicates what type of operand this is
     char firstChar = shortenedOperand[0];
+    //cout << data->symbolTable->getSymbolInfo("TOTAL").first << endl;
 
     //Check if operand is a number
     if(isStringANumber(shortenedOperand)) return make_pair(stoi(shortenedOperand), false);
@@ -200,7 +201,7 @@ pair<unsigned int, bool> convertOperandToTargetAddress(const string& operand, Da
     //Check if operand is an expression
     string operations = "+-*/";
     for(char op : operations) {
-        int index = shortenedOperand.find(op);
+        size_t index = shortenedOperand.find(op);
         if(index != string::npos) {
             //The string contains the operation being checked
             string operand1 = shortenedOperand.substr(1, index - 1);
@@ -228,6 +229,9 @@ pair<unsigned int, bool> convertOperandToTargetAddress(const string& operand, Da
     }
     if(firstChar == ' ' || firstChar == '@') {
         //Simple/Indirect addressing, get symbol address from symbol table and return
+        //cout << shortenedOperand << endl << shortenedOperand.substr(1).length() << endl;
+        //cout << data->symbolTable->getSymbolInfo(" TOTAL").first << endl;
+        //cout << hex << uppercase << data->symbolTable->getSymbolInfo(shortenedOperand.substr(1)).first << endl;
         return make_pair(data->symbolTable->getSymbolInfo(shortenedOperand.substr(1)).first, true);
     }
 
@@ -241,7 +245,7 @@ void processAssemblerDirective(vector<string>* lineParts, Data* data, vector<vec
     string label = lineParts->at(0);
     string instruction = lineParts->at(1).substr(1);
     string operand = lineParts->at(2);
-    int targetAddress;
+    unsigned int targetAddress;
     bool targetAddressRelative;
     if(!operand.empty()) {
         pair<unsigned int, bool> convertedOperand = convertOperandToTargetAddress(operand, data);
@@ -249,7 +253,7 @@ void processAssemblerDirective(vector<string>* lineParts, Data* data, vector<vec
         targetAddressRelative = convertedOperand.second;
     }
 
-    int address = data->currentAddress;
+    unsigned int address = data->currentAddress;
     SymbolTable* symbolTable = data->symbolTable;
 
     if(instruction == "START") {
@@ -360,13 +364,16 @@ pair<bool, unsigned int> testPCRelativeAddressing(unsigned int targetAddress, in
         return make_pair(false, 0);
     }
 }
-pair<bool, unsigned int> testBaseRelativeAddressing(unsigned int targetAddress, int base, unsigned int objectCode) {
-    int diff = targetAddress - base;
-    if(base != -1 && diff >= 0 && diff <= 4095) {
+pair<bool, unsigned int> testBaseRelativeAddressing(unsigned int targetAddress, Data* data, unsigned int objectCode) {
+    unsigned int base = data->baseRegister;
+
+    if(!data->baseRegisterValid || targetAddress < base) return make_pair(false, 0);
+
+    if(targetAddress - base <= 4095) {
         //Meets conditions for base relative addressing, use base relative addressing
         objectCode = addBits(objectCode, {1, 0, 0});
         //Add last 12 bits (displacement), masking not necessary because diff must be positive
-        objectCode = addNumber(objectCode, diff, 12);
+        objectCode = addNumber(objectCode, targetAddress - base, 12);
         return make_pair(true, objectCode);
     } else {
         return make_pair(false, 0);
@@ -397,9 +404,10 @@ void recalculateInstructionObjectCodes(unsigned int addressOfLastInstruction, Da
         //BASE and NOBASE instructions should be processed here to make sure base register is kept up to date
         if(instruction->at(2) == " BASE") {
             data->baseRegister = convertOperandToTargetAddress(instruction->at(3), data).first;
+            data->baseRegisterValid = true;
         }
         if(instruction->at(2) == " NOBASE") {
-            data->baseRegister = -1;
+            data->baseRegisterValid = false;
         }
 
         if(targetAddress.second) {
@@ -436,9 +444,10 @@ unsigned int convertInstructionToObjectCode(vector<string>* instruction, Data* d
     //Don't calculate target address for format 3/4 instructions
     if(format == 3 || format == 4)  {
         //RSUB is an exception, it is a format 3 instruction but doesn't take an operand
-        if(instruction->at(2) == " RSUB") {
+        if(instruction->at(2).find("RSUB") != string::npos) {
             targetAddresses->emplace_back(0, false);
-            return 0x4F0000;
+            //5177344 = 0x4F0000
+            return 5177344;
         }
         else targetAddress = convertOperandToTargetAddress(instruction->at(3), data).first;
     }
@@ -489,7 +498,7 @@ unsigned int convertInstructionToObjectCode(vector<string>* instruction, Data* d
             if(result.first) return result.second;
 
             //Try base relative addressing
-            result = testBaseRelativeAddressing(targetAddress, data->baseRegister, objectCode);
+            result = testBaseRelativeAddressing(targetAddress, data, objectCode);
             if(result.first) return result.second;
         } else {
             targetAddresses->emplace_back(targetAddress, true);
@@ -501,7 +510,7 @@ unsigned int convertInstructionToObjectCode(vector<string>* instruction, Data* d
             if(result.first) return result.second;
 
             //Try base relative addressing
-            result = testBaseRelativeAddressing(targetAddress, data->baseRegister, objectCode);
+            result = testBaseRelativeAddressing(targetAddress, data, objectCode);
             if(result.first) return result.second;
 
             //Try direct addressing
@@ -544,12 +553,8 @@ unsigned int convertInstructionToObjectCode(vector<string>* instruction, Data* d
     return 0;
 }
 
-int main(int argc, char** argv) {
-    if(argc == 1) {
-        cout << "Invalid number of arguments; received 0, expected at least 1." << endl;
-        exit(BAD_EXIT);
-    }
-
+//Performs all assembling and output processes for one assembly file
+void assembleFile(const string& filename) {
     //REMEMBER TO USE .substr(1) ON INSTRUCTION WHEN SEARCHING THROUGH EITHER OF THESE LISTS
     //Initialize a vector containing all assembler directives
     set<string> assemblerDirectives{"START", "END", "RESB", "RESW", "BYTE", "WORD", "BASE",
@@ -562,14 +567,15 @@ int main(int argc, char** argv) {
     SymbolTable symbolTable;
 
     //Open source code file
-    ifstream sourceFile(argv[1]);
+    ifstream sourceFile(filename);
     string line;
 
     //Initialize data object for ease of passing information to functions
     Data data;
     data.currentAddress = 0;
     data.additionalAddressCounter = 0;
-    data.baseRegister = -1;
+    data.baseRegister = 0;
+    data.baseRegisterValid = false;
     data.symbolTable = &symbolTable;
     data.opTable = &opTable;
 
@@ -604,7 +610,7 @@ int main(int argc, char** argv) {
         } else {
             //Current instruction is not an assembler directive
             //Check if current instruction contains a label, add it to the symbol table if so
-            if(!lineParts.at(0).empty()) {
+            if(lineParts.at(0) != " ") {
                 symbolTable.addSymbol(lineParts.at(0), data.currentAddress, true);
             }
 
@@ -678,9 +684,10 @@ int main(int argc, char** argv) {
             if(instruction.at(2) == " BASE") {
                 unsigned int value = convertOperandToTargetAddress(instruction.at(3), &data).first;
                 data.baseRegister = value;
+                data.baseRegisterValid = true;
             }
             if(instruction.at(2) == " NOBASE") {
-                data.baseRegister = -1;
+                data.baseRegisterValid = false;
             }
             if(instruction.at(2) == " END") {
                 data.symbolTable->setLengthOfProgram(data.currentAddress + data.additionalAddressCounter);
@@ -719,25 +726,40 @@ int main(int argc, char** argv) {
 
     //Print out all converted instructions
     //No further processing of instructions done at this stage, only output
+    ofstream listingFile, symbolTableFile;
+    string fileWithoutExtension = filename.substr(0, filename.find('.'));
+
+    listingFile.open(fileWithoutExtension + ".l");
+
     for(auto instruction : convertedInstructions) {
         //Skip printing address on END instruction
         if(instruction[2] == " END") {
-            cout << "        ";
+            listingFile << "        ";
         } else {
-            cout << instruction.at(0) << "    ";
+            listingFile << instruction.at(0) << "    ";
         }
-        cout << instruction.at(1);
-        printSpaces(8 - instruction.at(1).length());
-        cout << instruction.at(2);
-        printSpaces(9 - instruction.at(2).length());
-        cout << instruction.at(3);
+        listingFile << instruction.at(1);
+        printSpacesToFile(8 - instruction.at(1).length(), &listingFile);
+        listingFile << instruction.at(2);
+        printSpacesToFile(9 - instruction.at(2).length(), &listingFile);
+        listingFile << instruction.at(3);
 
-        printSpaces(26 - instruction.at(3).length());
-        cout << instruction.at(4) << endl;
+        printSpacesToFile(26 - instruction.at(3).length(), &listingFile);
+        listingFile << instruction.at(4) << endl;
     }
 
-    cout << endl << endl;
     symbolTable.printSymbols();
+}
+
+int main(int argc, char** argv) {
+    if(argc == 1) {
+        cout << "Invalid number of arguments; received 0, expected at least 1." << endl;
+        exit(BAD_EXIT);
+    }
+
+    for(int i = 1; i < argc; i++) {
+        assembleFile(argv[i]);
+    }
 
     return NORMAL_EXIT;
 }

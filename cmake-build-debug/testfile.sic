@@ -3,16 +3,14 @@ SUM       START   0                      SAMPLE PROGRAM
 FIRST     LDX    #0
           LDA    #0
          +LDB    #TABLE2     
-          BASE    TABLE2
+          BASE    TABLE2   
 LOOP      ADD     TABLE,X    
           ADD     TABLE2,X   
           TIX     COUNT      
           JLT     LOOP       
-         +STA     TOTAL
-          RSUB
+         +STA     TOTAL                    FILLER
+          RSUB                              FILLER
 MYLIT     LDA    =C'EOF'
-          LDA    #10000
-         +LDX    #10000
 COUNT     RESW    1
 TABLE     RESW    2000
 TABLE2    RESW    2000

@@ -6,13 +6,13 @@ using namespace std;
 class SymbolTable {
 private:
     vector<string> *labels;
-    vector<pair<int, bool>> *symbolInfo;
+    vector<pair<unsigned int, bool>> *symbolInfo;
 
     vector<string> *literals;
     vector<vector<unsigned int>> *literalInfo;
 
     string CSectName;
-    int startingAddress, programLength;
+    unsigned int startingAddress{}, programLength{};
 
 public:
     SymbolTable();
@@ -20,16 +20,17 @@ public:
 
     static unsigned int getValue(string operand);
 
-    void addSymbol(const string& symbolName, int address, bool relative);
+    void addSymbol(const string& symbolName, unsigned int address, bool relative);
     pair<int, bool> getSymbolInfo(const string& symbolName);
     void incrementSymbolAddresses(unsigned int address);
 
     void addLiteral(string literal);
     vector<unsigned int> getLiteralInfo(const string& literalName);
-    unsigned int setLiteralsAtAddress(unsigned int address, vector<vector<string>>* instructions, int* addressCounter);
+    unsigned int setLiteralsAtAddress(unsigned int address, vector<vector<string>>* instructions, unsigned int* addressCounter);
 
-    void setCSECT(string name, int address);
-    void setLengthOfProgram(int length);
+    void setCSECT(string name, unsigned int address);
+    void setLengthOfProgram(unsigned int length);
 
     void printSymbols();
+    void printLabels();
 };
